@@ -1,3 +1,7 @@
+## <small>1.15.2 (2026-06-04)</small>
+
+* fix(attribution): ignore shared/NAT IPs in fingerprint matching + support CDN client-IP header (#26) ([58684e1](https://github.com/LinkForty/core/commit/58684e1)), closes [#26](https://github.com/LinkForty/core/issues/26)
+
 ## <small>1.15.1 (2026-05-04)</small>
 
 * docs(sdk-spec): document optional appToken for Cloud install scoping (#25) ([9bf399c](https://github.com/LinkForty/core/commit/9bf399c)), closes [#25](https://github.com/LinkForty/core/issues/25) [#24](https://github.com/LinkForty/core/issues/24)
