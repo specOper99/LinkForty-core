@@ -1,3 +1,7 @@
+## 1.17.0 (2026-06-08)
+
+* feat(sdk): capture SDK name + version on install and events (#28) ([c38f10f](https://github.com/LinkForty/core/commit/c38f10f)), closes [#28](https://github.com/LinkForty/core/issues/28)
+
 ## 1.16.0 (2026-06-08)
 
 * feat(sdk): persist last-click attribution on in-app events (SIT-237) (#27) ([24dff3e](https://github.com/LinkForty/core/commit/24dff3e)), closes [#27](https://github.com/LinkForty/core/issues/27)
