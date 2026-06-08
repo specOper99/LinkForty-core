@@ -1,3 +1,7 @@
+## 1.16.0 (2026-06-08)
+
+* feat(sdk): persist last-click attribution on in-app events (SIT-237) (#27) ([24dff3e](https://github.com/LinkForty/core/commit/24dff3e)), closes [#27](https://github.com/LinkForty/core/issues/27)
+
 ## <small>1.15.2 (2026-06-04)</small>
 
 * fix(attribution): ignore shared/NAT IPs in fingerprint matching + support CDN client-IP header (#26) ([58684e1](https://github.com/LinkForty/core/commit/58684e1)), closes [#26](https://github.com/LinkForty/core/issues/26)
