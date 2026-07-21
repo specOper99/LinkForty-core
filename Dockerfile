@@ -38,7 +38,6 @@ RUN npm ci --omit=dev --ignore-scripts && \
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/migrations ./migrations
 
 # Copy example server file
 COPY examples/basic-server.ts ./
