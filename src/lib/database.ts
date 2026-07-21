@@ -51,6 +51,17 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
   const client = await connectWithRetry();
 
   try {
+    // Organizations table (must be created before links, which references it)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        settings JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
     // Link templates table (must be created before links, which references it)
     await client.query(`
       CREATE TABLE IF NOT EXISTS link_templates (
@@ -80,6 +91,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
         web_fallback_url TEXT,
         utm_parameters JSONB DEFAULT '{}',
         targeting_rules JSONB DEFAULT '{}',
+        organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
         is_active BOOLEAN DEFAULT true,
         expires_at TIMESTAMP,
         append_click_id BOOLEAN DEFAULT false,
@@ -496,6 +508,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_link_templates_slug ON link_templates(slug)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_link_templates_user_id ON link_templates(user_id)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_links_template_id ON links(template_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_links_organization_id ON links(organization_id)');
 
     // Indexes for webhooks
     await client.query('CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)');
@@ -520,6 +533,19 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
           WHERE table_name='links' AND column_name='deep_link_parameters'
         ) THEN
           ALTER TABLE links ADD COLUMN deep_link_parameters JSONB DEFAULT '{}';
+        END IF;
+      END $$;
+    `);
+
+    // Add organization_id column to existing links tables that predate the organizations feature
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='links' AND column_name='organization_id'
+        ) THEN
+          ALTER TABLE links ADD COLUMN organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
         END IF;
       END $$;
     `);
