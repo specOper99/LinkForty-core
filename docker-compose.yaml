@@ -32,13 +32,13 @@ services:
 
   linkforty:
     # Use published image (recommended for production)
-    image: linkforty/core:latest
+    # image: linkforty/core:latest
 
     # OR build from source (for development)
     # Uncomment the lines below and comment out the 'image:' line above
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
 
     depends_on:
       postgres:
@@ -58,7 +58,7 @@ services:
       HOST: ${HOST:-0.0.0.0}
 
       # Optional: JWT secret for authentication
-      # JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
 
       # Optional: Email configuration
       # SMTP_HOST: ${SMTP_HOST}
@@ -72,12 +72,12 @@ services:
     restart: unless-stopped
 
     # Health check (optional, uncomment if needed)
-    # healthcheck:
-    #   test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 3
-    #   start_period: 40s
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:
