@@ -546,10 +546,10 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
           WHERE table_name='links' AND column_name='organization_id'
         ) THEN
           ALTER TABLE links ADD COLUMN organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+          EXECUTE 'CREATE INDEX IF NOT EXISTS idx_links_organization_id ON links(organization_id)';
         END IF;
       END $$;
     `);
-    await client.query('CREATE INDEX IF NOT EXISTS idx_links_organization_id ON links(organization_id)');
 
     console.log('Database schema initialized successfully');
   } catch (error) {
