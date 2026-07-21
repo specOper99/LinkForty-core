@@ -86,6 +86,6 @@ volumes:
     driver: local
 
 # Optional: Add network configuration for isolation
-# networks:
-#   linkforty:
-#     driver: bridge
+networks:
+  linkforty:
+    driver: bridge
