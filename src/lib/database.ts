@@ -62,7 +62,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
       )
     `);
 
-    // Link templates table (must be created before links, which references it)
+    // Link templates table (must be created before links, which references both it and organizations)
     await client.query(`
       CREATE TABLE IF NOT EXISTS link_templates (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -549,6 +549,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
         END IF;
       END $$;
     `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_links_organization_id ON links(organization_id)');
 
     console.log('Database schema initialized successfully');
   } catch (error) {
