@@ -7,7 +7,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (including devDependencies for build)
-RUN npm ci
+# Override a build-time NODE_ENV=production so TypeScript is installed.
+# The explicit build command below replaces the prepare lifecycle hook.
+RUN NODE_ENV=development npm ci --ignore-scripts
 
 # Copy source files
 COPY . .
@@ -31,7 +33,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev --ignore-scripts && \
     npm cache clean --force
 
 # Copy built files from builder
