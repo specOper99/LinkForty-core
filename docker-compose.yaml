@@ -79,13 +79,17 @@ services:
       retries: 3
       start_period: 40s
 
+    networks:
+      - default
+      - shared
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
 
-# Optional: Add network configuration for isolation
 networks:
-  linkforty:
-    driver: bridge
+  shared:
+    external: true
+    name: linkforty_shared
