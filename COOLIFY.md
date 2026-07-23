@@ -45,6 +45,37 @@ linkforty ────────────► postgres, redis
 
 Leave `DATABASE_URL` unset in the Coolify UI (compose sets it). Do not publish Postgres/Redis host ports.
 
+If the Coolify resource has a custom **Healthcheck** (curl/wget to `/`), disable it and rely on compose — or set path `/api/sdk/v1/health`, start period ≥90s, retries ≥5.
+
+## `dependency failed… unhealthy` in ~1s
+
+Compose messages differ:
+
+| Message | Meaning |
+|---|---|
+| `container … is unhealthy` | Process may still be running; Docker health = unhealthy |
+| `container … exited (N)` | Process crash (migrate/server exit) |
+
+Coolify often ignores compose `start_period` or overrides the healthcheck in the UI, so Core looks unhealthy before migrate finishes. Dashboard uses `depends_on: service_started` so that race does not block deploy.
+
+Still check Core logs on the host:
+
+```bash
+docker ps -a --filter name=linkforty --format '{{.ID}} {{.Names}} {{.Status}}'
+CID=$(docker ps -aq --filter name=linkforty | head -1)
+docker logs --tail 200 "$CID"
+docker inspect --format '{{json .State.Health}}' "$CID" | jq .
+```
+
+Common log signals:
+
+| Signal | Fix |
+|---|---|
+| `28P01` / password auth failed | Alphanumeric `POSTGRES_PASSWORD` only; wipe postgres volume after password change; delete empty `DATABASE_URL` from Coolify UI |
+| `does not support SSL` | Compose already uses `?sslmode=disable` — clear any UI `DATABASE_URL` that forces SSL |
+| `Server listening` + Health unhealthy | Probe/UI override — disable Coolify custom healthcheck |
+| Instant exit, no listen | Inspect exit code; missing `JWT_SECRET` / migrate error |
+
 ## Admin password (use base64 — do not paste raw bcrypt)
 
 Raw bcrypt (`$2b$12$…`) breaks Compose/Coolify: `$` is variable interpolation (`The "zU2dGbpZ0j" variable is not set`). `$$` escaping often still fails because Coolify also passes the value as a build-arg.

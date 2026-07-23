@@ -87,8 +87,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
+      # service_started — Coolify often marks linkforty "unhealthy" in <1s
+      # (UI HC override / ignored start_period) while migrate is still running.
+      # Crash still surfaces as "exited (N)".
       linkforty:
-        condition: service_healthy
+        condition: service_started
     environment:
       CORE_URL: ${CORE_URL:-http://linkforty:3000}
       SHORTLINK_BASE_URL: ${SHORTLINK_BASE_URL:-}
