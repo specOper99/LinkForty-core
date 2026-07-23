@@ -16,13 +16,19 @@
 #
 # See COOLIFY.md for setup.
 
+# Shared DB credentials — same interpolation for postgres + linkforty (avoids
+# one service getting ${POSTGRES_PASSWORD:-changeme} default while the other
+# gets Coolify's real secret).
+x-db-credentials: &db-credentials
+  POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+  POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
 services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
-      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      <<: *db-credentials
     volumes:
       - postgres_data:/var/lib/postgresql/data
     expose:
@@ -31,7 +37,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-linkforty} -d ${POSTGRES_DB:-linkforty}",
+          "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\"",
         ]
       interval: 5s
       timeout: 5s
@@ -62,15 +68,13 @@ services:
       redis:
         condition: service_healthy
     environment:
+      <<: *db-credentials
       # Discrete PG vars — do NOT build DATABASE_URL here. Compose/Coolify
       # interpolation mangles passwords with $ @ # ! / while postgres still
       # gets the raw POSTGRES_PASSWORD → 28P01 or wrong default DB name.
       PGHOST: postgres
       PGPORT: "5432"
       DATABASE_SSL: "false"
-      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
       REDIS_URL: redis://redis:6379
       NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"

@@ -75,10 +75,33 @@ Common log signals:
 
 | Signal | Fix |
 |---|---|
-| `28P01` / password auth failed | Wipe postgres volume after user/password change; delete empty `DATABASE_URL` from Coolify UI; prefer alphanumeric password |
-| `database "…username…" does not exist` | Mangling from `DATABASE_URL` with special chars in password — use discrete PG vars (compose default); wipe volume; clear UI `DATABASE_URL` |
+| `28P01` / password auth failed | **Same password must reach both containers**, then wipe volume. See below. |
+| `database "…username…" does not exist` | Old healthcheck without `-d` (noise) or mangled `DATABASE_URL` — clear UI `DATABASE_URL` |
 | `does not support SSL` | Compose sets `DATABASE_SSL=false` — clear any UI `DATABASE_URL` that forces SSL |
 | `Skipping initialization` | Volume already has data — env user/password changes ignored until volume wipe |
+| Core log `passwordLen=8` | Linkforty got default `changeme` — Coolify did not pass `POSTGRES_PASSWORD` into compose env |
+| Core log `passwordLen=N` but still 28P01 | Length ≠ postgres; compare with commands below; wipe volume after fixing |
+
+### Prove both containers share the password
+
+On the Coolify host (after deploy attempt):
+
+```bash
+P=$(docker ps -aq --filter name=postgres | head -1)
+L=$(docker ps -aq --filter name=linkforty | head -1)
+docker exec "$P" printenv POSTGRES_PASSWORD | wc -c
+docker exec "$L" printenv POSTGRES_PASSWORD | wc -c
+# lengths must match. To compare without printing secrets:
+docker exec "$P" printenv POSTGRES_PASSWORD | sha256sum
+docker exec "$L" printenv POSTGRES_PASSWORD | sha256sum
+```
+
+Reset recipe that always works:
+
+1. Coolify env (runtime only): `POSTGRES_DB=linkforty`, `POSTGRES_USER=linkforty`, `POSTGRES_PASSWORD=linkforty` (simple alphanumeric).
+2. Delete any `DATABASE_URL` in Coolify UI.
+3. Wipe postgres volume.
+4. Redeploy. Core log should show `passwordLen=10` and connect.
 | `Server listening` + Health unhealthy | Probe/UI override — disable Coolify custom healthcheck |
 | Instant exit, no listen | Inspect exit code; missing `JWT_SECRET` / migrate error |
 

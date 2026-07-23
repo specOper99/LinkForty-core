@@ -74,7 +74,9 @@ export function resolveDatabaseConfig(options: DatabaseOptions = {}): ResolvedDb
 
   const host = (process.env.PGHOST || '').trim();
   const user = (process.env.POSTGRES_USER || process.env.PGUSER || '').trim();
-  const password = process.env.POSTGRES_PASSWORD ?? process.env.PGPASSWORD ?? '';
+  const password = sanitizePgPassword(
+    process.env.POSTGRES_PASSWORD ?? process.env.PGPASSWORD ?? ''
+  );
   const database = (
     process.env.POSTGRES_DB ||
     process.env.PGDATABASE ||
@@ -99,6 +101,20 @@ export function resolveDatabaseConfig(options: DatabaseOptions = {}): ResolvedDb
     connectionString: 'postgresql://postgres:password@localhost:5432/linkforty',
     ssl: resolvePoolSsl('postgresql://postgres:password@localhost:5432/linkforty'),
   };
+}
+
+/** Strip Coolify/UI wrapping quotes + trailing CR/LF (common paste artifacts). */
+export function sanitizePgPassword(raw: string): string {
+  let v = raw;
+  if (v.endsWith('\r\n')) v = v.slice(0, -2);
+  else if (v.endsWith('\n') || v.endsWith('\r')) v = v.slice(0, -1);
+  if (
+    (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+    (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+  ) {
+    v = v.slice(1, -1);
+  }
+  return v;
 }
 
 function isTransientDbError(error: { code?: string; message?: string }): boolean {
@@ -166,7 +182,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
     });
   } else {
     console.log(
-      `Database config: ${resolved.user}@${resolved.host}:${resolved.port}/${resolved.database} (ssl=${JSON.stringify(resolved.ssl)})`
+      `Database config: ${resolved.user}@${resolved.host}:${resolved.port}/${resolved.database} (ssl=${JSON.stringify(resolved.ssl)}, passwordLen=${resolved.password.length})`
     );
     db = new Pool({
       host: resolved.host,

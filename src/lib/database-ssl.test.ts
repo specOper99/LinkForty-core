@@ -101,6 +101,18 @@ describe('resolveDatabaseConfig', () => {
     });
   });
 
+  it('strips wrapping quotes and trailing newlines from password', () => {
+    process.env.PGHOST = 'postgres';
+    process.env.POSTGRES_USER = 'mediazan';
+    process.env.POSTGRES_PASSWORD = '"secret"\n';
+    process.env.POSTGRES_DB = 'linkforty';
+    const cfg = resolveDatabaseConfig();
+    expect(cfg.mode).toBe('discrete');
+    if (cfg.mode === 'discrete') {
+      expect(cfg.password).toBe('secret');
+    }
+  });
+
   it('falls back to localhost URL when nothing is configured', () => {
     const cfg = resolveDatabaseConfig();
     expect(cfg.mode).toBe('url');
