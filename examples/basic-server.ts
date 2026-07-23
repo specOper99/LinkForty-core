@@ -43,4 +43,7 @@ async function start() {
   console.log('  GET    /:shortCode         - Redirect to target URL');
 }
 
-start().catch(console.error);
+start().catch((err) => {
+  console.error('LinkForty server failed to start:', err);
+  process.exit(1);
+});

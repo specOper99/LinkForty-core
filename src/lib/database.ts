@@ -17,6 +17,56 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Resolve pg SSL from DATABASE_URL / DATABASE_SSL — NOT from NODE_ENV.
+ *
+ * Coolify/Docker Compose set NODE_ENV=production while talking to plain
+ * postgres:15-alpine (no TLS). Forcing SSL then makes migrate/server exit in
+ * <1s with "The server does not support SSL connections", and Compose reports
+ * the exited container as "unhealthy".
+ *
+ * Honor `?sslmode=` in the URL (disable / require / verify-*) or DATABASE_SSL.
+ */
+export function resolvePoolSsl(
+  connectionString: string
+): false | { rejectUnauthorized: boolean } {
+  const sslEnv = (process.env.DATABASE_SSL || '').toLowerCase();
+  if (sslEnv === '0' || sslEnv === 'false' || sslEnv === 'disable') return false;
+  if (sslEnv === '1' || sslEnv === 'true' || sslEnv === 'require') {
+    return { rejectUnauthorized: false };
+  }
+
+  const match = connectionString.match(/[?&]sslmode=([^&]*)/i);
+  const mode = decodeURIComponent(match?.[1] || '').toLowerCase();
+  if (!mode || mode === 'disable' || mode === 'allow' || mode === 'prefer') {
+    return false;
+  }
+  if (mode === 'require' || mode === 'no-verify') {
+    return { rejectUnauthorized: false };
+  }
+  if (mode === 'verify-ca' || mode === 'verify-full') {
+    return { rejectUnauthorized: true };
+  }
+  return false;
+}
+
+function isTransientDbError(error: { code?: string; message?: string }): boolean {
+  const code = error.code || '';
+  if (
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === '57P03' || // cannot_connect_now
+    code === '53300' // too_many_connections
+  ) {
+    return true;
+  }
+  const msg = (error.message || '').toLowerCase();
+  return msg.includes('the database system is starting up');
+}
+
 // Retry database connection with exponential backoff
 async function connectWithRetry(maxRetries: number = 10, baseDelay: number = 1000): Promise<pg.PoolClient> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -25,7 +75,7 @@ async function connectWithRetry(maxRetries: number = 10, baseDelay: number = 100
       console.log('Database connection established successfully');
       return client;
     } catch (error: any) {
-      if (error.code === 'ECONNREFUSED' && attempt < maxRetries) {
+      if (isTransientDbError(error) && attempt < maxRetries) {
         const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
         console.log(`Database connection attempt ${attempt} failed. Retrying in ${delay}ms...`);
         await sleep(delay);
@@ -40,10 +90,21 @@ async function connectWithRetry(maxRetries: number = 10, baseDelay: number = 100
 
 // Initialize database schema
 export async function initializeDatabase(options: DatabaseOptions = {}) {
-  // Initialize pool
+  const fromOptions = options.url?.trim();
+  const fromEnv = process.env.DATABASE_URL?.trim();
+  const connectionString =
+    fromOptions || fromEnv || 'postgresql://postgres:password@localhost:5432/linkforty';
+
+  if (!fromOptions && !fromEnv) {
+    console.warn(
+      'DATABASE_URL empty/unset — using localhost fallback. On Coolify, do not set empty DATABASE_URL in UI; let compose build postgresql://…@postgres/…?sslmode=disable'
+    );
+  }
+
+  // Initialize pool — SSL from URL/env only (see resolvePoolSsl)
   db = new Pool({
-    connectionString: options.url || process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:5432/linkforty',
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    connectionString,
+    ssl: resolvePoolSsl(connectionString),
     min: options.pool?.min || 2,
     max: options.pool?.max || 10,
   });

@@ -82,27 +82,27 @@ services:
       - coolify
     restart: unless-stopped
     healthcheck:
-      # node:22-alpine has no wget/curl. Real health is /api/sdk/v1/health
-      # (bare /health hits shortCode redirect catch-all). Migrate+boot can be 60s+.
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://127.0.0.1:3000/api/sdk/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
-        ]
+      # Prefer committed probe script (fetch). curl also installed for Coolify UI
+      # probes that still expect curl/wget. Path must be /api/sdk/v1/health.
+      # If deploy fails in <1s with "is unhealthy" (not "exited"), Coolify is
+      # ignoring start_period — check UI healthcheck overrides (see COOLIFY.md).
+      test: ["CMD", "node", "/app/docker-healthcheck.mjs"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 90s
+      start_interval: 5s
 
   dashboard:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
+      # service_started — NOT service_healthy. Coolify often marks linkforty
+      # "unhealthy" in <1s (UI HC override / ignored start_period) while the
+      # process is still migrating. Crash still surfaces as "exited (N)".
       linkforty:
-        condition: service_healthy
+        condition: service_started
     environment:
       # Same compose network — stable Docker DNS (no shared external net)
       CORE_URL: ${CORE_URL:-http://linkforty:3000}
