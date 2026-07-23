@@ -10,7 +10,8 @@
 #   AUTH_URL = https://dashboard.example.com  (no :3001)
 #   SHORTLINK_BASE_URL = https://links.example.com
 #   POSTGRES_PASSWORD: alphanumeric only (Compose interpolates DATABASE_URL)
-#   ADMIN_PASSWORD_HASH: escape every $ as $$ (see COOLIFY.md)
+#   ADMIN_PASSWORD_HASH_B64: base64(bcrypt) — not raw $2b$… (see COOLIFY.md)
+#   Secrets + NODE_ENV: Runtime only in Coolify UI (uncheck Available at Buildtime)
 #
 # See COOLIFY.md for setup.
 
@@ -96,8 +97,9 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:3001}
       AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
-      # Pass-through (no default). Bcrypt `$` → escape as `$$` in env UI.
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      # Prefer B64 — bcrypt `$` breaks Compose/Coolify env + build-args.
+      ADMIN_PASSWORD_HASH_B64: ${ADMIN_PASSWORD_HASH_B64:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       OPERATOR_USER_ID: ${OPERATOR_USER_ID:?OPERATOR_USER_ID is required}
       NODE_ENV: production

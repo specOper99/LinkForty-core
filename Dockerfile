@@ -8,8 +8,9 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# Full install so typescript / @types are available for tsc
-RUN npm ci --ignore-scripts
+# --include=dev: hosts (e.g. Coolify) may inject ARG NODE_ENV=production,
+# which would otherwise make npm ci skip typescript / @types.
+RUN npm ci --include=dev --ignore-scripts
 
 COPY . .
 

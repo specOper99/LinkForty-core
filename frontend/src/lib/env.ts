@@ -26,6 +26,23 @@ export function normalizeEnvString(raw: string | undefined): string | undefined 
   return v || undefined;
 }
 
+/**
+ * Resolve bcrypt hash. Prefer ADMIN_PASSWORD_HASH_B64 (no `$` — safe for
+ * Compose/Coolify interpolation) over raw ADMIN_PASSWORD_HASH.
+ */
+export function resolveAdminPasswordHash(): string | undefined {
+  const b64 = normalizeEnvString(process.env.ADMIN_PASSWORD_HASH_B64);
+  if (b64) {
+    try {
+      const decoded = Buffer.from(b64, "base64").toString("utf8").trim();
+      if (decoded.startsWith("$2")) return decoded;
+    } catch {
+      /* fall through */
+    }
+  }
+  return normalizeEnvString(process.env.ADMIN_PASSWORD_HASH);
+}
+
 const envSchema = z
   .object({
     CORE_URL: z.string().url(),
@@ -86,7 +103,7 @@ export function getEnv(): ServerEnv {
     AUTH_SECRET: normalizeEnvString(process.env.AUTH_SECRET),
     AUTH_URL: normalizeEnvString(process.env.AUTH_URL),
     ADMIN_USERNAME: normalizeEnvString(process.env.ADMIN_USERNAME),
-    ADMIN_PASSWORD_HASH: normalizeEnvString(process.env.ADMIN_PASSWORD_HASH),
+    ADMIN_PASSWORD_HASH: resolveAdminPasswordHash(),
     ADMIN_PASSWORD: normalizeEnvString(process.env.ADMIN_PASSWORD),
     OPERATOR_USER_ID: operatorRaw,
     CORE_API_TOKEN: normalizeEnvString(process.env.CORE_API_TOKEN),

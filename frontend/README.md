@@ -74,10 +74,10 @@ Generate a password hash:
 node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"
 ```
 
-**Compose + bcrypt:** hashes contain `$`. Escape every `$` as `$$` in compose env (see [`COOLIFY.md`](../COOLIFY.md)):
+**Compose / Coolify + bcrypt:** do **not** paste raw `$2b$12$…`. Use base64 — see [`COOLIFY.md`](../COOLIFY.md):
 
 ```text
-ADMIN_PASSWORD_HASH=$$2b$$12$$…yourhash…
+ADMIN_PASSWORD_HASH_B64=JDJiJDEyJHpVMmRHYnBaMGova25mNXE4ZmlVQ2VYQWRpQ1kxeUNSbjYvRU9EcWdGNUJMWkZKWTQwbzY2
 ```
 
 ## Routes

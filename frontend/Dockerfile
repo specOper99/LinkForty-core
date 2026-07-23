@@ -4,8 +4,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 
-# Full install so typescript / build tooling are available
-RUN npm ci
+# --include=dev: hosts may inject ARG NODE_ENV=production and skip build tools.
+RUN npm ci --include=dev
 
 COPY . .
 
@@ -19,6 +19,7 @@ RUN CORE_URL=http://127.0.0.1:3000 \
     ADMIN_USERNAME=admin \
     ADMIN_PASSWORD=build-placeholder \
     ADMIN_PASSWORD_HASH= \
+    ADMIN_PASSWORD_HASH_B64= \
     OPERATOR_USER_ID=00000000-0000-4000-8000-000000000001 \
     npm run build
 
