@@ -88,7 +88,7 @@ ADMIN_PASSWORD_HASH_B64=JDJiJDEyJHpVMmRHYnBaMGova25mNXE4ZmlVQ2VYQWRpQ1kxeUNSbjYv
 | `/` | Analytics overview |
 | `/links` | List / create / edit / QR / per-link analytics |
 | `/webhooks` | CRUD, secret reveal-once, test delivery |
-| `/debug` | Simulate / live WS / attribution. UA/country/language presets fall back locally if Core omits `debugRoutes` (404) |
+| `/debug` | Simulate / live WS / attribution. Core `createServer()` registers `debugRoutes`; UA/country/language presets still fall back locally on 404 |
 | `/settings` | Health probes, well-known verify, CORS checklist |
 
 ## Architecture

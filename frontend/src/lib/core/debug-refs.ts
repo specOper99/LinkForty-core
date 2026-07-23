@@ -1,10 +1,9 @@
 /**
  * Built-in debug reference lists.
  *
- * Vanilla `@linkforty/core` `createServer()` does NOT register `debugRoutes`
- * (simulate / user-agents / countries / languages / live WS). Those return 404
- * unless the Core host explicitly `register(debugRoutes)`. Dashboard falls
- * back to these fixtures so Debug UI still works.
+ * Prefer Core `/api/debug/{user-agents,countries,languages}` when available.
+ * Fall back to these fixtures for older Core hosts or custom servers that omit
+ * `debugRoutes` (404). Simulate + live WS still require Core `debugRoutes`.
  */
 
 export type DebugUserAgent = {

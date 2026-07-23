@@ -1,6 +1,7 @@
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import redis from '@fastify/redis';
+import websocket from '@fastify/websocket';
 import { initializeDatabase, DatabaseOptions } from './lib/database.js';
 import { redirectRoutes } from './routes/redirect.js';
 import { linkRoutes } from './routes/links.js';
@@ -9,6 +10,7 @@ import { sdkRoutes } from './routes/sdk.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { templateRoutes } from './routes/templates.js';
 import { qrRoutes } from './routes/qr.js';
+import { debugRoutes } from './routes/debug.js';
 import { wellKnownRoutes } from './routes/well-known.js';
 
 /**
@@ -30,8 +32,9 @@ export interface ServerOptions {
 /**
  * Create and configure a LinkForty Fastify server instance.
  *
- * Registers CORS, optional Redis, the database connection, and all built-in
- * route plugins. The returned instance is ready to call `listen()` on.
+ * Registers CORS, optional Redis, WebSocket support, the database connection,
+ * and all built-in route plugins (including debug simulate / live WS). The
+ * returned instance is ready to call `listen()` on.
  *
  * @param options - Server configuration (database, Redis, CORS, logger).
  * @returns A configured Fastify instance with all routes registered.
@@ -54,6 +57,9 @@ export async function createServer(options: ServerOptions = {}) {
     });
   }
 
+  // WebSocket (required by /api/debug/live)
+  await fastify.register(websocket);
+
   // Database
   await initializeDatabase(options.database);
 
@@ -66,6 +72,7 @@ export async function createServer(options: ServerOptions = {}) {
   await fastify.register(webhookRoutes);
   await fastify.register(templateRoutes);
   await fastify.register(qrRoutes);
+  await fastify.register(debugRoutes);
 
   return fastify;
 }

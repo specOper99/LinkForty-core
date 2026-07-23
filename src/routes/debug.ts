@@ -20,8 +20,9 @@ const simulateRequestSchema = z.object({
 type SimulateRequest = z.infer<typeof simulateRequestSchema>;
 
 /**
- * Debugging routes for testing and validation
- * Premium Cloud-only feature
+ * Debugging routes for testing and validation.
+ * Registered by createServer() (simulate, UA/country/language lists, live WS).
+ * Requires @fastify/websocket to be registered on the same Fastify instance.
  */
 export async function debugRoutes(fastify: FastifyInstance) {
   /**

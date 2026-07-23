@@ -33,7 +33,7 @@ export async function simulateAction(
       if (err.status === 404) {
         return {
           error:
-            "Core has no /api/debug/simulate (404). Register debugRoutes on Core: await server.register(debugRoutes)",
+            "Core has no /api/debug/simulate (404). Upgrade Core (createServer registers debugRoutes) or await server.register(debugRoutes)",
         };
       }
       return {
