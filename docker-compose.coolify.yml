@@ -1,0 +1,154 @@
+# Single Coolify resource: Postgres + Redis + Core + Dashboard.
+# All four share the default project network → CORE_URL=http://linkforty:3000 works
+# without an external linkforty_shared network.
+#
+# Coolify UI:
+#   Resource type: Docker Compose
+#   Compose file: docker-compose.coolify.yml
+#   Domains:
+#     linkforty  → https://links.example.com:3000
+#     dashboard  → https://dashboard.example.com:3001
+#   AUTH_URL = https://dashboard.example.com  (no :3001)
+#   SHORTLINK_BASE_URL = https://links.example.com
+#   bcrypt ADMIN_PASSWORD_HASH: escape $ as $$ in Coolify env UI
+#
+# See COOLIFY.md for full setup.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
+      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Coolify: keep DB internal — no host port publish
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-linkforty}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    # Coolify: keep Redis internal — no host port publish
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  linkforty:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkforty}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-linkforty}?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # Required — empty ${JWT_SECRET} expands badly in Coolify
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      # Dashboard public origin (not *). Comma-separated if multiple.
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://dashboard.example.com}
+      # Behind Coolify/Traefik — trust X-Forwarded-For
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      SHORTLINK_DOMAIN: ${SHORTLINK_DOMAIN:-}
+    # Coolify routes via Traefik — expose only (no host bind)
+    expose:
+      - "3000"
+    labels:
+      # Multi-network: force Traefik onto Coolify proxy net
+      # Do NOT set loadbalancer.server.port — Coolify UI Domains owns that
+      - traefik.docker.network=coolify
+    networks:
+      - default
+      - coolify
+    restart: unless-stopped
+    healthcheck:
+      # Real health is /api/sdk/v1/health (not /health — that hits redirect catch-all)
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/api/sdk/v1/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      linkforty:
+        condition: service_healthy
+    environment:
+      # Same compose network — stable Docker DNS (no shared external net)
+      CORE_URL: ${CORE_URL:-http://linkforty:3000}
+      SHORTLINK_BASE_URL: ${SHORTLINK_BASE_URL:-}
+      CORE_API_TOKEN: ${CORE_API_TOKEN:-}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3001}
+      AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OPERATOR_USER_ID: ${OPERATOR_USER_ID:?OPERATOR_USER_ID is required}
+      NODE_ENV: production
+      PORT: "3001"
+      HOST: "0.0.0.0"
+    # Coolify routes via Traefik — expose only
+    expose:
+      - "3001"
+    labels:
+      - traefik.docker.network=coolify
+    networks:
+      - default
+      - coolify
+    restart: unless-stopped
+    healthcheck:
+      # node:22-alpine has no wget/curl — use node so Coolify/Traefik see healthy
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  # Coolify reverse-proxy network (exists on Coolify hosts)
+  coolify:
+    external: true

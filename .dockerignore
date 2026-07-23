@@ -1,0 +1,44 @@
+# Core image context is repo root (COPY . .). Keep the build lean and
+# avoid baking the Next.js dashboard (or its secrets) into @linkforty/core.
+
+# VCS / IDE
+.git
+.gitignore
+.github
+.cursor
+.vscode
+.idea
+
+# Dashboard — built separately via frontend/Dockerfile
+frontend
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+!.env.coolify.example
+
+# Dependencies / build artifacts
+node_modules
+dist
+coverage
+*.tsbuildinfo
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+vitest.config.*
+src/**/__tests__
+
+# Docs / assets not needed at runtime
+*.md
+!README.md
+assets
+docs
+infra
+examples/docker-compose.yml
+
+# Coolify / local compose noise (not needed inside Core image)
+docker-compose*.yml
+docker-compose*.yaml
+.dockerignore

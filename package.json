@@ -42,7 +42,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "dashboard:dev": "npm --prefix frontend run dev",
+    "dashboard:build": "npm --prefix frontend run build",
+    "dashboard:typecheck": "npm --prefix frontend run typecheck"
   },
   "dependencies": {
     "@fastify/cors": "^8.4.0",

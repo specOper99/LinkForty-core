@@ -1,0 +1,67 @@
+# UI-only compose — expects Core already reachable at CORE_URL.
+#
+# Coolify / two-compose setups: Core + dashboard must share a Docker network.
+# On the host once:
+#   docker network create linkforty_shared
+# Attach the same external network on Core's compose (see README).
+#
+# Coolify proxy: also join the `coolify` network + traefik.docker.network label,
+# otherwise Traefik picks the wrong IP when multiple networks are attached (502/504).
+#
+# In Coolify UI → service General/Domains for `dashboard`:
+#   Domain: https://dashboard.example.com:3001
+#   (FQDN + container port 3001 — required or Traefik hits wrong port)
+# Set AUTH_URL to the public https:// URL (no :3001 in AUTH_URL).
+# Redeploy after domain change.
+
+services:
+  dashboard:
+    build: .
+    # Coolify routes via Traefik — expose only. Avoid host port binds on Coolify.
+    expose:
+      - "3001"
+    environment:
+      # Internal Core origin (Docker DNS). Never Cloudflare public host for BFF.
+      # Health probe path on Core: /api/sdk/v1/health (not /health).
+      CORE_URL: ${CORE_URL:-http://linkforty:3000}
+      SHORTLINK_BASE_URL: ${SHORTLINK_BASE_URL:-}
+      CORE_API_TOKEN: ${CORE_API_TOKEN:-}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3001}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OPERATOR_USER_ID: ${OPERATOR_USER_ID}
+      NODE_ENV: production
+      PORT: "3001"
+      HOST: "0.0.0.0"
+    labels:
+      # Multi-network: force Traefik onto Coolify proxy net (not linkforty_shared).
+      # Do NOT set loadbalancer.server.port here — Coolify UI Domains owns that.
+      - traefik.docker.network=coolify
+    networks:
+      - coolify
+      - shared
+    restart: unless-stopped
+    healthcheck:
+      # node:22-alpine has no wget/curl — use node so Coolify/Traefik see healthy
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  # Coolify reverse-proxy network (exists on Coolify hosts).
+  coolify:
+    external: true
+  # Shared with Core compose for CORE_URL=http://linkforty:3000
+  shared:
+    external: true
+    name: ${COMPOSE_SHARED_NETWORK:-linkforty_shared}
