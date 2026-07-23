@@ -27,7 +27,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # v2: bump name to force re-init when Coolify keeps a stale volume after
+      # POSTGRES_PASSWORD/USER changes (old volume → 28P01 forever).
+      - postgres_data_v2:/var/lib/postgresql/data
     expose:
       - "5432"
     healthcheck:
@@ -143,7 +145,7 @@ services:
       start_period: 40s
 
 volumes:
-  postgres_data:
+  postgres_data_v2:
     driver: local
   redis_data:
     driver: local
