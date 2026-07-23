@@ -9,7 +9,8 @@
 #     dashboard  → https://dashboard.example.com:3001
 #   AUTH_URL = https://dashboard.example.com  (no :3001)
 #   SHORTLINK_BASE_URL = https://links.example.com
-#   POSTGRES_PASSWORD: alphanumeric only (Compose interpolates DATABASE_URL)
+#   POSTGRES_PASSWORD: prefer alphanumeric; wipe volume after any password/user change
+#   Leave DATABASE_URL unset in Coolify UI (compose uses PGHOST + POSTGRES_*)
 #   ADMIN_PASSWORD_HASH_B64: base64(bcrypt) — not raw $2b$… (see COOLIFY.md)
 #   Secrets + NODE_ENV: Runtime only in Coolify UI (uncheck Available at Buildtime)
 #
@@ -57,7 +58,15 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-linkforty}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-linkforty}?sslmode=disable
+      # Discrete PG vars — do NOT build DATABASE_URL here. Compose/Coolify
+      # interpolation mangles passwords with $ @ # ! / while postgres still
+      # gets the raw POSTGRES_PASSWORD → 28P01 or wrong default DB name.
+      PGHOST: postgres
+      PGPORT: "5432"
+      DATABASE_SSL: "false"
+      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
       REDIS_URL: redis://redis:6379
       NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"

@@ -19,7 +19,7 @@ linkforty ────────────► postgres, redis
    - `CORS_ORIGIN` = public dashboard origin
    - `AUTH_URL` = public dashboard URL (**no** `:3001`)
    - `SHORTLINK_BASE_URL` = public shortlink origin
-   - `POSTGRES_PASSWORD` = **alphanumeric only** (Compose builds `DATABASE_URL`)
+   - `POSTGRES_PASSWORD` (prefer alphanumeric; special chars OK with discrete PG vars)
 4. **Runtime only** — in Coolify → Environment Variables, uncheck **Available at Buildtime** for:
    - `NODE_ENV`, `JWT_SECRET`, `AUTH_SECRET`, `ADMIN_PASSWORD_HASH_B64`, `ADMIN_PASSWORD_HASH`, `POSTGRES_PASSWORD`
    - Coolify otherwise injects them as Docker `ARG` / `--build-arg` and breaks the build (`tsc` missing, bcrypt `$` warnings).
@@ -43,7 +43,9 @@ linkforty ────────────► postgres, redis
 
 `linkforty` and `dashboard` join the external `coolify` network and set `traefik.docker.network=coolify`. Do **not** set Traefik `loadbalancer.server.port` in compose — Coolify Domains owns the port.
 
-Leave `DATABASE_URL` unset in the Coolify UI (compose sets it). Do not publish Postgres/Redis host ports.
+**Leave `DATABASE_URL` unset** in the Coolify UI — compose passes `PGHOST` + `POSTGRES_*` (avoids URL-mangled passwords). Do not publish Postgres/Redis host ports.
+
+**Postgres volume:** `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` only apply on **first** init. After change: wipe the postgres volume in Coolify (or `docker volume rm …_postgres-data`) then redeploy. Log line `Skipping initialization` = old credentials still on disk.
 
 If the Coolify resource has a custom **Healthcheck** (curl/wget to `/`), disable it and rely on compose — or set path `/api/sdk/v1/health`, start period ≥90s, retries ≥5.
 
@@ -71,8 +73,10 @@ Common log signals:
 
 | Signal | Fix |
 |---|---|
-| `28P01` / password auth failed | Alphanumeric `POSTGRES_PASSWORD` only; wipe postgres volume after password change; delete empty `DATABASE_URL` from Coolify UI |
-| `does not support SSL` | Compose already uses `?sslmode=disable` — clear any UI `DATABASE_URL` that forces SSL |
+| `28P01` / password auth failed | Wipe postgres volume after user/password change; delete empty `DATABASE_URL` from Coolify UI; prefer alphanumeric password |
+| `database "…username…" does not exist` | Mangling from `DATABASE_URL` with special chars in password — use discrete PG vars (compose default); wipe volume; clear UI `DATABASE_URL` |
+| `does not support SSL` | Compose sets `DATABASE_SSL=false` — clear any UI `DATABASE_URL` that forces SSL |
+| `Skipping initialization` | Volume already has data — env user/password changes ignored until volume wipe |
 | `Server listening` + Health unhealthy | Probe/UI override — disable Coolify custom healthcheck |
 | Instant exit, no listen | Inspect exit code; missing `JWT_SECRET` / migrate error |
 
