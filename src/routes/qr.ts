@@ -2,6 +2,29 @@ import { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
 import { db } from '../lib/database.js';
 
+/** Public origin for QR payloads. Host-only SHORTLINK_DOMAIN → https://… */
+export function resolveShortlinkBase(opts: {
+  shortlinkBaseUrl?: string;
+  shortlinkDomain?: string;
+  protocol: string;
+  hostname: string;
+}): string {
+  const fromBase = opts.shortlinkBaseUrl?.trim();
+  if (fromBase) {
+    return fromBase.replace(/\/$/, '');
+  }
+
+  const domain = opts.shortlinkDomain?.trim();
+  if (domain) {
+    if (/^https?:\/\//i.test(domain)) {
+      return domain.replace(/\/$/, '');
+    }
+    return `https://${domain.replace(/^\/+|\/+$/g, '')}`;
+  }
+
+  return `${opts.protocol}://${opts.hostname}`.replace(/\/$/, '');
+}
+
 /**
  * QR Code Routes - Generate QR codes for links
  */
@@ -32,36 +55,6 @@ export async function qrRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Invalid format. Use "png" or "svg".' });
     }
 
-    // Build cache key
-    const cacheKey = `qr:${id}:${format}:${size}:${color}:${bgcolor}`;
-
-    // Try to get from cache
-    if (fastify.redis) {
-      try {
-        const cached = await fastify.redis.get(cacheKey);
-        if (cached) {
-          fastify.log.info(`QR code cache hit: ${cacheKey}`);
-
-          if (format === 'png') {
-            // Cached PNG is base64
-            const buffer = Buffer.from(cached, 'base64');
-            return reply
-              .type('image/png')
-              .header('Cache-Control', 'public, max-age=86400') // 24 hours
-              .send(buffer);
-          } else {
-            // Cached SVG is text
-            return reply
-              .type('image/svg+xml')
-              .header('Cache-Control', 'public, max-age=86400')
-              .send(cached);
-          }
-        }
-      } catch (error) {
-        fastify.log.warn('Redis QR cache lookup failed');
-      }
-    }
-
     // Get link from database
     const result = await db.query(
       'SELECT short_code, original_url FROM links WHERE id = $1 AND is_active = true',
@@ -74,18 +67,48 @@ export async function qrRoutes(fastify: FastifyInstance) {
 
     const link = result.rows[0];
 
-    // Build short URL using configured domain or request hostname
-    // Use SHORTLINK_DOMAIN env var for production deployments
-    const shortLinkDomain = process.env.SHORTLINK_DOMAIN || `${request.protocol}://${request.hostname}`;
+    const shortLinkBase = resolveShortlinkBase({
+      shortlinkBaseUrl: process.env.SHORTLINK_BASE_URL,
+      shortlinkDomain: process.env.SHORTLINK_DOMAIN,
+      protocol: request.protocol,
+      hostname: request.hostname,
+    });
     const shortUrl = link.short_code
-      ? `${shortLinkDomain}/${link.short_code}`
+      ? `${shortLinkBase}/${link.short_code}`
       : link.original_url;
 
+    // Include encoded URL so scheme/domain fixes bust stale Redis entries
+    const cacheKey = `qr:v2:${id}:${format}:${size}:${color}:${bgcolor}:${shortUrl}`;
+
+    // Try to get from cache
+    if (fastify.redis) {
+      try {
+        const cached = await fastify.redis.get(cacheKey);
+        if (cached) {
+          fastify.log.info(`QR code cache hit: ${cacheKey}`);
+
+          if (format === 'png') {
+            const buffer = Buffer.from(cached, 'base64');
+            return reply
+              .type('image/png')
+              .header('Cache-Control', 'public, max-age=86400')
+              .send(buffer);
+          } else {
+            return reply
+              .type('image/svg+xml')
+              .header('Cache-Control', 'public, max-age=86400')
+              .send(cached);
+          }
+        }
+      } catch (error) {
+        fastify.log.warn('Redis QR cache lookup failed');
+      }
+    }
+
     try {
-      // QR code options
       const options = {
-        errorCorrectionLevel: 'M' as const, // Medium error correction
-        margin: 1, // Quiet zone margin
+        errorCorrectionLevel: 'M' as const,
+        margin: 1,
         width: size,
         color: {
           dark: color,
@@ -94,13 +117,11 @@ export async function qrRoutes(fastify: FastifyInstance) {
       };
 
       if (format === 'png') {
-        // Generate PNG as buffer
         const buffer = await QRCode.toBuffer(shortUrl, options);
 
-        // Cache as base64
         if (fastify.redis) {
           try {
-            await fastify.redis.setex(cacheKey, 86400, buffer.toString('base64')); // 24 hour TTL
+            await fastify.redis.setex(cacheKey, 86400, buffer.toString('base64'));
           } catch (error) {
             fastify.log.warn('Failed to cache QR code');
           }
@@ -112,13 +133,11 @@ export async function qrRoutes(fastify: FastifyInstance) {
           .header('Content-Disposition', `inline; filename="qr-${link.short_code || 'code'}.png"`)
           .send(buffer);
       } else {
-        // Generate SVG as string
         const svg = await QRCode.toString(shortUrl, {
           ...options,
           type: 'svg',
         });
 
-        // Cache SVG text
         if (fastify.redis) {
           try {
             await fastify.redis.setex(cacheKey, 86400, svg);
