@@ -92,7 +92,24 @@ Common log signals:
 | Core log `passwordLen=8` | Linkforty got default `changeme` — Coolify did not pass `POSTGRES_PASSWORD` into compose env |
 | Core log `passwordLen=N` but still 28P01 | Length ≠ postgres; compare with commands below; wipe volume after fixing |
 
-### Prove both containers share the password
+### Network mismatch (28P01 with correct password)
+
+If `docker inspect` shows **linkforty** on `coolify` + `…_default` but **postgres** only on a bare UUID network, Core’s `postgres` DNS hits the wrong place.
+
+**Immediate fix on host** (use your resource UUID):
+
+```bash
+P=$(docker ps -q --filter name=postgres | head -1)
+L=$(docker ps -q --filter name=linkforty | head -1)
+# connect postgres onto every network linkforty already uses:
+for n in $(docker inspect "$L" --format '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}'); do
+  docker network connect "$n" "$P" 2>/dev/null || true
+done
+docker exec -i "$P" psql -U mediazan -d postgres -c "ALTER USER mediazan WITH PASSWORD 'TheP1AssD1c7Here';"
+docker restart "$L"
+```
+
+Compose now attaches postgres/redis to both `default` and `coolify` with aliases so this should not recur after redeploy.
 
 Use `inspect` (works even when linkforty is restarting — `docker exec` lies):
 

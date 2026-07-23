@@ -14,14 +14,16 @@
 #   ADMIN_PASSWORD_HASH_B64: base64(bcrypt) — not raw $2b$… (see COOLIFY.md)
 #   Secrets + NODE_ENV: Runtime only in Coolify UI (uncheck Available at Buildtime)
 #
-# No YAML anchors/merge keys — Coolify's compose preprocessor can drop them,
-# leaving linkforty without POSTGRES_PASSWORD → 28P01.
+# Networks: postgres/redis/linkforty/dashboard ALL join `default` + `coolify`.
+# Coolify often puts proxy services on coolify+_default but leaves DB only on a
+# UUID network → hostname `postgres` resolves wrong → 28P01 despite correct env.
 #
 # See COOLIFY.md for setup.
 
 services:
   postgres:
     image: postgres:15-alpine
+    hostname: postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
@@ -32,6 +34,11 @@ services:
       - postgres_data_v2:/var/lib/postgresql/data
     expose:
       - "5432"
+    networks:
+      default:
+        aliases: [postgres]
+      coolify:
+        aliases: [postgres]
     healthcheck:
       test:
         [
@@ -45,11 +52,17 @@ services:
 
   redis:
     image: redis:7-alpine
+    hostname: redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     expose:
       - "6379"
+    networks:
+      default:
+        aliases: [redis]
+      coolify:
+        aliases: [redis]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -151,10 +164,9 @@ volumes:
     driver: local
 
 networks:
-  # Traefik proxy network. Coolify install creates `coolify`; some setups
-  # rewrite this to the resource UUID — create whichever name the error asks for:
-  #   docker network create coolify
-  #   docker network create <resource-uuid>
+  default:
+    driver: bridge
+  # Traefik proxy network (Coolify install creates `coolify`).
   coolify:
     name: ${COOLIFY_NETWORK:-coolify}
     external: true

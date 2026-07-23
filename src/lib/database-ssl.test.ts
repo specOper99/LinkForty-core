@@ -101,7 +101,7 @@ describe('resolveDatabaseConfig', () => {
     });
   });
 
-  it('strips wrapping quotes and trailing newlines from password', () => {
+  it('strips trailing newlines from password but keeps quotes', () => {
     process.env.PGHOST = 'postgres';
     process.env.POSTGRES_USER = 'mediazan';
     process.env.POSTGRES_PASSWORD = '"secret"\n';
@@ -109,7 +109,7 @@ describe('resolveDatabaseConfig', () => {
     const cfg = resolveDatabaseConfig();
     expect(cfg.mode).toBe('discrete');
     if (cfg.mode === 'discrete') {
-      expect(cfg.password).toBe('secret');
+      expect(cfg.password).toBe('"secret"');
     }
   });
 

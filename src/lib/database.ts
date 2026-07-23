@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { createHash } from 'node:crypto';
 
 const { Pool } = pg;
 
@@ -103,18 +104,17 @@ export function resolveDatabaseConfig(options: DatabaseOptions = {}): ResolvedDb
   };
 }
 
-/** Strip Coolify/UI wrapping quotes + trailing CR/LF (common paste artifacts). */
+/** Strip trailing CR/LF only. Do not strip quotes — Postgres docker entrypoint
+ *  keeps them as part of the password; stripping caused 28P01 mismatches. */
 export function sanitizePgPassword(raw: string): string {
   let v = raw;
   if (v.endsWith('\r\n')) v = v.slice(0, -2);
   else if (v.endsWith('\n') || v.endsWith('\r')) v = v.slice(0, -1);
-  if (
-    (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
-    (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
-  ) {
-    v = v.slice(1, -1);
-  }
   return v;
+}
+
+function passwordFingerprint(password: string): string {
+  return createHash('sha256').update(password, 'utf8').digest('hex').slice(0, 12);
 }
 
 function isTransientDbError(error: { code?: string; message?: string }): boolean {
@@ -182,7 +182,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
     });
   } else {
     console.log(
-      `Database config: ${resolved.user}@${resolved.host}:${resolved.port}/${resolved.database} (ssl=${JSON.stringify(resolved.ssl)}, passwordLen=${resolved.password.length})`
+      `Database config: ${resolved.user}@${resolved.host}:${resolved.port}/${resolved.database} (ssl=${JSON.stringify(resolved.ssl)}, passwordLen=${resolved.password.length}, passwordSha256=${passwordFingerprint(resolved.password)})`
     );
     db = new Pool({
       host: resolved.host,
