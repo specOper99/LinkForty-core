@@ -14,6 +14,9 @@ build/
 .env.local
 .env.*.local
 
+# Self-host generated (bootstrap.sh)
+deploy/selfhost/Caddyfile.generated
+
 # IDE
 .vscode/
 .idea/
