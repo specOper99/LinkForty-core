@@ -28,25 +28,28 @@ export default function GlobalError({
           <p className="text-sm text-[#9fb0c3]">{msg || "Client exception"}</p>
           {looksLikeProxyBlock ? (
             <div className="space-y-2 rounded border border-[#f59e0b]/40 p-3 text-sm text-[#fbbf24]">
-              <p className="font-medium">Likely Cloudflare / WAF 403</p>
+              <p className="font-medium">Unexpected server response</p>
               <ul className="list-disc space-y-1 pl-4 text-[#e8eef6]">
                 <li>
-                  Do <strong>not</strong> host this dashboard on the public
-                  shortlink hostname (e.g. links.*). Use a separate host like{" "}
+                  Grey-cloud DNS only? Usually <strong>not</strong> Cloudflare.
+                  Rebuild dashboard with{" "}
+                  <code className="font-mono text-[#5eead4]">AUTH_URL</code>{" "}
+                  equal to this exact HTTPS host (Server Actions origin is baked
+                  at build).
+                </li>
+                <li>
+                  Do <strong>not</strong> put the dashboard on the shortlink
+                  hostname. Use a separate host (e.g.{" "}
                   <code className="font-mono text-[#5eead4]">
-                    dashboard.yourdomain.com
+                    links-dash.example.com
                   </code>
-                  .
+                  ).
                 </li>
                 <li>
-                  Set <code className="font-mono">AUTH_URL</code> to that
-                  dashboard HTTPS URL.
-                </li>
-                <li>
-                  Cloudflare: turn off Bot Fight for the dashboard zone, or add
-                  a WAF skip for paths starting with{" "}
-                  <code className="font-mono">/_next</code> and same-origin
-                  POSTs (Next.js Flight / Server Actions).
+                  If Cloudflare is orange-proxied: disable Bot Fight for this
+                  host, or WAF skip for{" "}
+                  <code className="font-mono">/_next</code> + Server Action
+                  POSTs.
                 </li>
               </ul>
             </div>

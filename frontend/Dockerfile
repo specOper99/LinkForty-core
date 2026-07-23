@@ -9,13 +9,19 @@ RUN npm ci --include=dev
 
 COPY . .
 
-# Build-time placeholders only — never bake real secrets into the image.
+# Build-time: AUTH_URL host is baked into Next.js serverActions.allowedOrigins.
+# Must match the public dashboard hostname (e.g. https://links-dash.example.com).
+# Secrets stay placeholders — never bake real AUTH_SECRET / passwords.
+ARG AUTH_URL=http://localhost:3001
+ARG SERVER_ACTIONS_ORIGINS=
+
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    AUTH_URL=${AUTH_URL} \
+    SERVER_ACTIONS_ORIGINS=${SERVER_ACTIONS_ORIGINS}
 
 RUN CORE_URL=http://127.0.0.1:3000 \
     AUTH_SECRET=build-time-placeholder-not-used \
-    AUTH_URL=http://localhost:3001 \
     ADMIN_USERNAME=admin \
     ADMIN_PASSWORD=build-placeholder \
     ADMIN_PASSWORD_HASH= \

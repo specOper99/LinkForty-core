@@ -110,6 +110,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        AUTH_URL: ${AUTH_URL:-http://localhost:3001}
+        SERVER_ACTIONS_ORIGINS: ${SERVER_ACTIONS_ORIGINS:-}
     depends_on:
       linkforty:
         condition: service_started

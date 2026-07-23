@@ -321,7 +321,6 @@ ${DASHBOARD_DOMAIN} {
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "geolocation=(), microphone=(), camera=()"
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; frame-ancestors 'none'"
 		-Server
 	}
 

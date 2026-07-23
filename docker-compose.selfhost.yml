@@ -139,6 +139,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Baked into Next serverActions.allowedOrigins — must match public host
+        AUTH_URL: ${AUTH_URL:?AUTH_URL is required}
+        SERVER_ACTIONS_ORIGINS: ${SERVER_ACTIONS_ORIGINS:-}
     depends_on:
       linkforty:
         condition: service_started
