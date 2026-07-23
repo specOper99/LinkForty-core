@@ -66,6 +66,86 @@ prompt_yn() {
   esac
 }
 
+# Optional string — Enter keeps empty (skip)
+prompt_optional() {
+  local __var="$1" __label="$2"
+  local __val=""
+  read -r -p "$__label (Enter=skip): " __val || true
+  printf -v "$__var" '%s' "$__val"
+}
+
+# Prompt optional iOS / Android Universal Links + App Links fields
+collect_mobile_env() {
+  IOS_TEAM_ID=""
+  IOS_BUNDLE_ID=""
+  ANDROID_PACKAGE_NAME=""
+  ANDROID_SHA256_FINGERPRINTS=""
+
+  echo
+  echo "--- Mobile deep links (optional) ---"
+  echo "  Serves /.well-known for Universal Links / App Links."
+  echo "  Store listing URLs are per-link in the dashboard — not here."
+  echo
+  echo "  iOS (Apple Developer → Membership Team ID + app Bundle ID)"
+  prompt_optional IOS_TEAM_ID "IOS_TEAM_ID"
+  prompt_optional IOS_BUNDLE_ID "IOS_BUNDLE_ID"
+  if [[ -n "$IOS_TEAM_ID" && -z "$IOS_BUNDLE_ID" ]] || [[ -z "$IOS_TEAM_ID" && -n "$IOS_BUNDLE_ID" ]]; then
+    echo "  warn: iOS needs BOTH IOS_TEAM_ID and IOS_BUNDLE_ID — clearing incomplete pair"
+    IOS_TEAM_ID=""
+    IOS_BUNDLE_ID=""
+  fi
+
+  echo
+  echo "  Android (package name + SHA-256 cert fingerprint(s), comma-separated)"
+  prompt_optional ANDROID_PACKAGE_NAME "ANDROID_PACKAGE_NAME"
+  prompt_optional ANDROID_SHA256_FINGERPRINTS "ANDROID_SHA256_FINGERPRINTS"
+  if [[ -n "$ANDROID_PACKAGE_NAME" && -z "$ANDROID_SHA256_FINGERPRINTS" ]] \
+    || [[ -z "$ANDROID_PACKAGE_NAME" && -n "$ANDROID_SHA256_FINGERPRINTS" ]]; then
+    echo "  warn: Android needs BOTH package + fingerprints — clearing incomplete pair"
+    ANDROID_PACKAGE_NAME=""
+    ANDROID_SHA256_FINGERPRINTS=""
+  fi
+}
+
+# Upsert key=value in .env (create file if missing). Safe for : and , in values.
+env_upsert() {
+  local file="$1" key="$2" value="$3"
+  LF_ENV_FILE="$file" LF_ENV_KEY="$key" LF_ENV_VALUE="$value" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["LF_ENV_FILE"])
+key = os.environ["LF_ENV_KEY"]
+value = os.environ["LF_ENV_VALUE"]
+lines = path.read_text().splitlines() if path.exists() else []
+out = []
+found = False
+prefix = f"{key}="
+for line in lines:
+    if line.startswith(prefix):
+        out.append(f"{key}={value}")
+        found = True
+    else:
+        out.append(line)
+if not found:
+    out.append(f"{key}={value}")
+path.write_text("\n".join(out) + "\n")
+path.chmod(0o600)
+PY
+}
+
+apply_mobile_env_file() {
+  local file="$1"
+  if [[ -n "${IOS_TEAM_ID:-}" && -n "${IOS_BUNDLE_ID:-}" ]]; then
+    env_upsert "$file" IOS_TEAM_ID "$IOS_TEAM_ID"
+    env_upsert "$file" IOS_BUNDLE_ID "$IOS_BUNDLE_ID"
+  fi
+  if [[ -n "${ANDROID_PACKAGE_NAME:-}" && -n "${ANDROID_SHA256_FINGERPRINTS:-}" ]]; then
+    env_upsert "$file" ANDROID_PACKAGE_NAME "$ANDROID_PACKAGE_NAME"
+    env_upsert "$file" ANDROID_SHA256_FINGERPRINTS "$ANDROID_SHA256_FINGERPRINTS"
+  fi
+}
+
 b64_bcrypt() {
   LF_ADMIN_PASS="$1" python3 - <<'PY'
 import os, base64, bcrypt
@@ -119,6 +199,12 @@ echo
 if [[ -f "$REPO_ROOT/.env" ]]; then
   prompt_yn REDEPLOY_ONLY "Redeploy stack only (keep .env, skip host/domain prompts)?" "n"
   if [[ "$REDEPLOY_ONLY" == "y" ]]; then
+    prompt_yn UPDATE_MOBILE "Add/update optional iOS/Android .well-known env in .env?" "n"
+    if [[ "$UPDATE_MOBILE" == "y" ]]; then
+      collect_mobile_env
+      apply_mobile_env_file "$REPO_ROOT/.env"
+      echo "  updated mobile keys in $REPO_ROOT/.env"
+    fi
     echo "==> docker compose up --build -d --force-recreate"
     compose_up
     wait_healthy || true
@@ -126,6 +212,12 @@ if [[ -f "$REPO_ROOT/.env" ]]; then
     echo "Done. Probe:"
     echo "  curl -sfS http://127.0.0.1:3000/api/sdk/v1/health"
     echo "  curl -sfS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3001/login"
+    if grep -qE '^IOS_TEAM_ID=.+' "$REPO_ROOT/.env" 2>/dev/null; then
+      echo "  curl -sfS https://YOUR_SHORTLINK_HOST/.well-known/apple-app-site-association"
+    fi
+    if grep -qE '^ANDROID_PACKAGE_NAME=.+' "$REPO_ROOT/.env" 2>/dev/null; then
+      echo "  curl -sfS https://YOUR_SHORTLINK_HOST/.well-known/assetlinks.json"
+    fi
     exit 0
   fi
 fi
@@ -140,6 +232,15 @@ prompt POSTGRES_USER "Postgres user" "linkforty"
 prompt POSTGRES_DB "Postgres database" "linkforty"
 prompt SSH_ALLOW_USER "SSH AllowUsers (for later harden)" "$USER"
 
+IOS_TEAM_ID=""
+IOS_BUNDLE_ID=""
+ANDROID_PACKAGE_NAME=""
+ANDROID_SHA256_FINGERPRINTS=""
+prompt_yn DO_MOBILE "Configure optional iOS/Android .well-known (Universal/App Links)?" "n"
+if [[ "$DO_MOBILE" == "y" ]]; then
+  collect_mobile_env
+fi
+
 prompt_yn DO_HOST "Install/harden host (Docker, Caddy, UFW, fail2ban)?" "y"
 prompt_yn DO_ENV "Write .env + generate secrets?" "y"
 prompt_yn DO_CADDY "Install Caddyfile to /etc/caddy/Caddyfile?" "y"
@@ -152,6 +253,8 @@ echo "  Shortlinks : https://$SHORTLINK_DOMAIN"
 echo "  Dashboard  : https://$DASHBOARD_DOMAIN"
 echo "  LE email   : $LE_EMAIL"
 echo "  Admin user : $ADMIN_USERNAME"
+echo "  iOS UL     : $([[ -n "${IOS_TEAM_ID:-}" ]] && echo "$IOS_TEAM_ID / $IOS_BUNDLE_ID" || echo skipped)"
+echo "  Android AL : $([[ -n "${ANDROID_PACKAGE_NAME:-}" ]] && echo "$ANDROID_PACKAGE_NAME" || echo skipped)"
 echo "  Host setup : $DO_HOST"
 echo "  Write .env : $DO_ENV"
 echo "  Caddyfile  : $DO_CADDY"
@@ -273,6 +376,19 @@ ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD_HASH_B64=${ADMIN_PASSWORD_HASH_B64}
 OPERATOR_USER_ID=${OPERATOR_USER_ID}
 EOF
+
+  # Optional mobile association (Universal Links / App Links)
+  if [[ -n "${IOS_TEAM_ID:-}" || -n "${ANDROID_PACKAGE_NAME:-}" ]]; then
+    {
+      echo
+      echo "# Mobile .well-known (optional)"
+      [[ -n "${IOS_TEAM_ID:-}" ]] && echo "IOS_TEAM_ID=${IOS_TEAM_ID}"
+      [[ -n "${IOS_BUNDLE_ID:-}" ]] && echo "IOS_BUNDLE_ID=${IOS_BUNDLE_ID}"
+      [[ -n "${ANDROID_PACKAGE_NAME:-}" ]] && echo "ANDROID_PACKAGE_NAME=${ANDROID_PACKAGE_NAME}"
+      [[ -n "${ANDROID_SHA256_FINGERPRINTS:-}" ]] && echo "ANDROID_SHA256_FINGERPRINTS=${ANDROID_SHA256_FINGERPRINTS}"
+    } >>"$REPO_ROOT/.env"
+  fi
+
   chmod 600 "$REPO_ROOT/.env"
   echo "  wrote $REPO_ROOT/.env (mode 600)"
 fi

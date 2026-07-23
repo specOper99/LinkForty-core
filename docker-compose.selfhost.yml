@@ -114,6 +114,12 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       TRUST_PROXY: ${TRUST_PROXY:-1}
       SHORTLINK_DOMAIN: ${SHORTLINK_DOMAIN:-}
+      SHORTLINK_BASE_URL: ${SHORTLINK_BASE_URL:-}
+      # Optional — iOS Universal Links / Android App Links (.well-known)
+      IOS_TEAM_ID: ${IOS_TEAM_ID:-}
+      IOS_BUNDLE_ID: ${IOS_BUNDLE_ID:-}
+      ANDROID_PACKAGE_NAME: ${ANDROID_PACKAGE_NAME:-}
+      ANDROID_SHA256_FINGERPRINTS: ${ANDROID_SHA256_FINGERPRINTS:-}
     # Host-only — never publish to 0.0.0.0 (Caddy terminates TLS)
     ports:
       - "127.0.0.1:${LINKFORTY_PORT:-3000}:3000"
