@@ -14,9 +14,11 @@
 #   ADMIN_PASSWORD_HASH_B64: base64(bcrypt) — not raw $2b$… (see COOLIFY.md)
 #   Secrets + NODE_ENV: Runtime only in Coolify UI (uncheck Available at Buildtime)
 #
-# Networks: postgres/redis/linkforty/dashboard ALL join `default` + `coolify`.
-# Coolify often puts proxy services on coolify+_default but leaves DB only on a
-# UUID network → hostname `postgres` resolves wrong → 28P01 despite correct env.
+# Networks:
+#   - postgres/redis: default only (DB must share default with Core)
+#   - linkforty/dashboard: default + coolify (Traefik)
+#   - coolify name is HARDCODED — do not use ${COOLIFY_NETWORK}; Coolify injects
+#     that as the resource UUID and then fails with "network UUID external not found"
 #
 # See COOLIFY.md for setup.
 
@@ -29,15 +31,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      # v2: bump name to force re-init when Coolify keeps a stale volume after
-      # POSTGRES_PASSWORD/USER changes (old volume → 28P01 forever).
       - postgres_data_v2:/var/lib/postgresql/data
     expose:
       - "5432"
     networks:
       default:
-        aliases: [postgres]
-      coolify:
         aliases: [postgres]
     healthcheck:
       test:
@@ -61,8 +59,6 @@ services:
     networks:
       default:
         aliases: [redis]
-      coolify:
-        aliases: [redis]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -80,8 +76,6 @@ services:
       redis:
         condition: service_healthy
     environment:
-      # Same POSTGRES_* as postgres service (duplicated on purpose — no anchors).
-      # Discrete vars — do NOT build DATABASE_URL (Compose mangles $ @ # ! /).
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -117,8 +111,6 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      # service_started — Coolify often marks linkforty "unhealthy" in <1s
-      # (UI HC override / ignored start_period) while migrate is still running.
       linkforty:
         condition: service_started
     environment:
@@ -166,7 +158,7 @@ volumes:
 networks:
   default:
     driver: bridge
-  # Traefik proxy network (Coolify install creates `coolify`).
+  # MUST stay literal name `coolify` (Coolify Traefik net). Never ${COOLIFY_NETWORK}.
   coolify:
-    name: ${COOLIFY_NETWORK:-coolify}
+    name: coolify
     external: true

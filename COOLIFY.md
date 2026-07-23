@@ -46,12 +46,11 @@ linkforty ────────────► postgres, redis
 If deploy fails with `network … declared as external, but could not be found`:
 
 ```bash
-# Normal Coolify host:
+# Traefik network (normal Coolify host):
 docker network create coolify 2>/dev/null || true
-# If error names your resource UUID instead (e.g. j134tl6yf01faa0otzddhfj6):
-docker network create j134tl6yf01faa0otzddhfj6 2>/dev/null || true
-# then Redeploy
 ```
+
+If the missing name is your **resource UUID** (e.g. `z1auwi48iaqhcabon68pedhm`): Coolify env had `COOLIFY_NETWORK` overridden. Compose now hardcodes `name: coolify` — delete any `COOLIFY_NETWORK` variable from the Coolify UI, pull latest compose, redeploy. Do **not** create a UUID-named stand-in unless Coolify UI Destination Network is intentionally that UUID.
 
 **Leave `DATABASE_URL` unset** in the Coolify UI — compose passes `PGHOST` + `POSTGRES_*` (avoids URL-mangled passwords). Do not publish Postgres/Redis host ports.
 
