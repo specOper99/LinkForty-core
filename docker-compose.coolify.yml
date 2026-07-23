@@ -10,7 +10,7 @@
 #     dashboard  → https://dashboard.example.com:3001
 #   AUTH_URL = https://dashboard.example.com  (no :3001)
 #   SHORTLINK_BASE_URL = https://links.example.com
-#   bcrypt ADMIN_PASSWORD_HASH: escape $ as $$ in Coolify env UI
+#   ADMIN_PASSWORD_HASH: escape every $ as $$ in Coolify env UI (see COOLIFY.md)
 #
 # See COOLIFY.md for full setup.
 
@@ -82,20 +82,19 @@ services:
       - coolify
     restart: unless-stopped
     healthcheck:
-      # Real health is /api/sdk/v1/health (not /health — that hits redirect catch-all)
+      # node:22-alpine has no wget/curl. Real health is /api/sdk/v1/health
+      # (bare /health hits shortCode redirect catch-all). Migrate+boot can be 60s+.
       test:
         [
           "CMD",
-          "wget",
-          "--quiet",
-          "--tries=1",
-          "--spider",
-          "http://localhost:3000/api/sdk/v1/health",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/api/sdk/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
         ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
 
   dashboard:
     build:
@@ -113,7 +112,9 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:3001}
       AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      # Pass-through (no ${VAR:-} default). Bcrypt has `$` — Coolify/.env must
+      # escape every `$` as `$$` or compose eats hash chunks (e.g. zU2dGbpZ0j).
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       OPERATOR_USER_ID: ${OPERATOR_USER_ID:?OPERATOR_USER_ID is required}
       NODE_ENV: production

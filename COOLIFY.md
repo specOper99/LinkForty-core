@@ -39,22 +39,28 @@ linkforty ────────────► postgres, redis
 
 `linkforty` and `dashboard` also join the external `coolify` network (Traefik) and set `traefik.docker.network=coolify`. Do **not** set Traefik `loadbalancer.server.port` in compose — Coolify Domains owns the port.
 
-## bcrypt `$` escaping
+## bcrypt `$` escaping (required)
 
-`ADMIN_PASSWORD_HASH` values look like `$2b$12$…`. Compose treats `$name` as interpolation.
+`ADMIN_PASSWORD_HASH` looks like `$2b$12$zU2dGbpZ0j…`. Docker Compose treats `$name` as interpolation, so unescaped hashes produce warnings like `The "zU2dGbpZ0j" variable is not set` and a broken login hash.
 
-In Coolify **Environment Variables** UI, escape every `$` as `$$`:
+**In Coolify → Environment Variables**, escape every `$` as `$$` (paste the escaped form, not the raw bcrypt string):
 
 ```text
-ADMIN_PASSWORD_HASH=$$2b$$12$$…yourhash…
+# Wrong (Compose eats $ chunks):
+ADMIN_PASSWORD_HASH=$2b$12$zU2dGbpZ0j…
+
+# Right (each $ → $$):
+ADMIN_PASSWORD_HASH=$$2b$$12$$zU2dGbpZ0j…
 ```
 
-Generate:
+Generate hash, then escape:
 
 ```bash
 node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"
+# then replace every $ with $$ before pasting into Coolify
 ```
 
+Compose passes `ADMIN_PASSWORD_HASH` through to the dashboard container; one Compose interpolation pass turns `$$` back into `$` for Node/bcrypt.
 ## What not to do
 
 | Anti-pattern | Why it breaks |

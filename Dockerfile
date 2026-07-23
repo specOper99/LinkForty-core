@@ -6,9 +6,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (including devDependencies for build)
-# Override a build-time NODE_ENV=production so TypeScript is installed.
-# The explicit build command below replaces the prepare lifecycle hook.
+# Install dependencies (including devDependencies for build).
+# Coolify may inject NODE_ENV=production as a build-arg/ENV — pin development
+# on this RUN so TypeScript/devDeps still install. prepare is skipped via --ignore-scripts.
 RUN NODE_ENV=development npm ci --ignore-scripts
 
 # Copy source files
@@ -54,9 +54,9 @@ USER linkforty
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+# Health check — /api/sdk/v1/health (not /health). start-period covers migrate+boot.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=90s --retries=12 \
+  CMD node -e "require('http').get('http://127.0.0.1:3000/api/sdk/v1/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
