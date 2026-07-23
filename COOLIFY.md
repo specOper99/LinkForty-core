@@ -41,7 +41,17 @@ linkforty ────────────► postgres, redis
 
 7. Deploy. Redeploy after Domains changes.
 
-`linkforty` and `dashboard` join the external `coolify` network and set `traefik.docker.network=coolify`. Do **not** set Traefik `loadbalancer.server.port` in compose — Coolify Domains owns the port.
+`linkforty` and `dashboard` join the external proxy network (`coolify` by default; override with `COOLIFY_NETWORK` if needed) and set `traefik.docker.network=coolify`. Do **not** set Traefik `loadbalancer.server.port` in compose — Coolify Domains owns the port.
+
+If deploy fails with `network … declared as external, but could not be found`:
+
+```bash
+# Normal Coolify host:
+docker network create coolify 2>/dev/null || true
+# If error names your resource UUID instead (e.g. j134tl6yf01faa0otzddhfj6):
+docker network create j134tl6yf01faa0otzddhfj6 2>/dev/null || true
+# then Redeploy
+```
 
 **Leave `DATABASE_URL` unset** in the Coolify UI — compose passes `PGHOST` + `POSTGRES_*` (avoids URL-mangled passwords). Do not publish Postgres/Redis host ports.
 
@@ -84,17 +94,18 @@ Common log signals:
 
 ### Prove both containers share the password
 
-On the Coolify host (after deploy attempt):
+Use `inspect` (works even when linkforty is restarting — `docker exec` lies):
 
 ```bash
 P=$(docker ps -aq --filter name=postgres | head -1)
 L=$(docker ps -aq --filter name=linkforty | head -1)
-docker exec "$P" printenv POSTGRES_PASSWORD | wc -c
-docker exec "$L" printenv POSTGRES_PASSWORD | wc -c
-# lengths must match. To compare without printing secrets:
-docker exec "$P" printenv POSTGRES_PASSWORD | sha256sum
-docker exec "$L" printenv POSTGRES_PASSWORD | sha256sum
+docker inspect "$P" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^POSTGRES_PASSWORD=' | sha256sum
+docker inspect "$L" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^POSTGRES_PASSWORD=' | sha256sum
+# Also check Core log for passwordLen=N
+docker logs --tail 30 "$L"
 ```
+
+Hashes must match. If linkforty line missing → `POSTGRES_PASSWORD` never reached Core (compose/Coolify bug).
 
 Reset recipe that always works:
 

@@ -10,10 +10,13 @@ function getTrustProxy(): boolean | number | undefined {
 }
 
 async function start() {
+  // Prefer DATABASE_URL when set. Otherwise leave url unset so createServer
+  // uses discrete PGHOST + POSTGRES_* / PG* (Coolify compose path).
+  const databaseUrl = process.env.DATABASE_URL?.trim();
   const server = await createServer({
-    database: {
-      url: process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:5432/linkforty',
-    },
+    database: databaseUrl
+      ? { url: databaseUrl }
+      : {},
     redis: {
       url: process.env.REDIS_URL || 'redis://localhost:6379',
     },

@@ -9,26 +9,23 @@
 #     dashboard  → https://dashboard.example.com:3001
 #   AUTH_URL = https://dashboard.example.com  (no :3001)
 #   SHORTLINK_BASE_URL = https://links.example.com
-#   POSTGRES_PASSWORD: prefer alphanumeric; wipe volume after any password/user change
+#   POSTGRES_PASSWORD: alphanumeric; wipe volume after any password/user change
 #   Leave DATABASE_URL unset in Coolify UI (compose uses PGHOST + POSTGRES_*)
 #   ADMIN_PASSWORD_HASH_B64: base64(bcrypt) — not raw $2b$… (see COOLIFY.md)
 #   Secrets + NODE_ENV: Runtime only in Coolify UI (uncheck Available at Buildtime)
 #
+# No YAML anchors/merge keys — Coolify's compose preprocessor can drop them,
+# leaving linkforty without POSTGRES_PASSWORD → 28P01.
+#
 # See COOLIFY.md for setup.
-
-# Shared DB credentials — same interpolation for postgres + linkforty (avoids
-# one service getting ${POSTGRES_PASSWORD:-changeme} default while the other
-# gets Coolify's real secret).
-x-db-credentials: &db-credentials
-  POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
-  POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
 
 services:
   postgres:
     image: postgres:15-alpine
     environment:
-      <<: *db-credentials
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     expose:
@@ -68,10 +65,11 @@ services:
       redis:
         condition: service_healthy
     environment:
-      <<: *db-credentials
-      # Discrete PG vars — do NOT build DATABASE_URL here. Compose/Coolify
-      # interpolation mangles passwords with $ @ # ! / while postgres still
-      # gets the raw POSTGRES_PASSWORD → 28P01 or wrong default DB name.
+      # Same POSTGRES_* as postgres service (duplicated on purpose — no anchors).
+      # Discrete vars — do NOT build DATABASE_URL (Compose mangles $ @ # ! /).
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       PGHOST: postgres
       PGPORT: "5432"
       DATABASE_SSL: "false"
@@ -106,7 +104,6 @@ services:
     depends_on:
       # service_started — Coolify often marks linkforty "unhealthy" in <1s
       # (UI HC override / ignored start_period) while migrate is still running.
-      # Crash still surfaces as "exited (N)".
       linkforty:
         condition: service_started
     environment:
@@ -117,7 +114,6 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:3001}
       AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
-      # Prefer B64 — bcrypt `$` breaks Compose/Coolify env + build-args.
       ADMIN_PASSWORD_HASH_B64: ${ADMIN_PASSWORD_HASH_B64:-}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -153,5 +149,10 @@ volumes:
     driver: local
 
 networks:
+  # Traefik proxy network. Coolify install creates `coolify`; some setups
+  # rewrite this to the resource UUID — create whichever name the error asks for:
+  #   docker network create coolify
+  #   docker network create <resource-uuid>
   coolify:
+    name: ${COOLIFY_NETWORK:-coolify}
     external: true
