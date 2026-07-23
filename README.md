@@ -125,11 +125,10 @@ See [DOCKER.md](DOCKER.md) for complete deployment guide.
 
 ### Coolify (Core + Dashboard)
 
-One Compose resource runs Postgres, Redis, Core, and the operator dashboard on the same project network (`CORE_URL=http://linkforty:3000` — no shared external network).
+One Compose resource: Postgres, Redis, Core, and dashboard. See [`COOLIFY.md`](COOLIFY.md).
 
-- Compose file: [`docker-compose.coolify.yml`](docker-compose.coolify.yml)
-- Env template: [`.env.coolify.example`](.env.coolify.example)
-- Setup guide: [`COOLIFY.md`](COOLIFY.md)
+- Compose: [`docker-compose.coolify.yml`](docker-compose.coolify.yml)
+- Env: [`.env.coolify.example`](.env.coolify.example)
 
 ## API Reference
 

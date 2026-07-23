@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Coolify / Docker health probe for LinkForty Core.
+ * Docker health probe for LinkForty Core.
  * Prefer this over inline `node -e` / wget (alpine has no wget by default).
  * Exit 0 only when the server is listening and returns 200.
  */

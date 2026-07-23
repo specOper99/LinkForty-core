@@ -18,13 +18,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Resolve pg SSL from DATABASE_URL / DATABASE_SSL — NOT from NODE_ENV.
- *
- * Coolify/Docker Compose set NODE_ENV=production while talking to plain
- * postgres:15-alpine (no TLS). Forcing SSL then makes migrate/server exit in
- * <1s with "The server does not support SSL connections", and Compose reports
- * the exited container as "unhealthy".
- *
+ * Resolve pg SSL from DATABASE_URL / DATABASE_SSL — not from NODE_ENV.
  * Honor `?sslmode=` in the URL (disable / require / verify-*) or DATABASE_SSL.
  * When there is no URL (discrete PG* / POSTGRES_* config), only DATABASE_SSL applies.
  */
@@ -64,10 +58,7 @@ export type ResolvedDbConfig =
     };
 
 /**
- * Prefer DATABASE_URL (Fly / managed). Else discrete host + POSTGRES_* / PG*
- * (Coolify Compose). Never embed password in a Compose-interpolated URL —
- * `$` / `@` / `#` get mangled while the postgres container still sees the raw
- * POSTGRES_PASSWORD Coolify injects → 28P01 auth failures.
+ * Prefer DATABASE_URL. Else discrete host + POSTGRES_* / PG* (libpq-style).
  */
 export function resolveDatabaseConfig(options: DatabaseOptions = {}): ResolvedDbConfig {
   const fromOptions = options.url?.trim();
@@ -159,7 +150,7 @@ export async function initializeDatabase(options: DatabaseOptions = {}) {
     !process.env.PGHOST?.trim()
   ) {
     console.warn(
-      'DATABASE_URL / PGHOST unset — using localhost fallback. On Coolify, set POSTGRES_* and omit DATABASE_URL; compose sets PGHOST=postgres'
+      'DATABASE_URL / PGHOST unset — using localhost fallback'
     );
   }
 

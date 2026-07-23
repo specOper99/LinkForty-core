@@ -16,7 +16,7 @@ const dev =
   process.env.NODE_ENV !== "production" &&
   process.env.E2E_PROD_SERVER !== "1";
 // Docker sets HOSTNAME to the container id — do NOT use it as listen address.
-// Prefer HOST / LISTEN_HOST; default 0.0.0.0 so Coolify/Traefik can reach the app.
+// Prefer HOST / LISTEN_HOST; default 0.0.0.0 so reverse proxies can reach the app.
 const hostname =
   process.env.HOST ||
   process.env.LISTEN_HOST ||

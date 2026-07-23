@@ -24,7 +24,7 @@ const allowedOrigins = serverActionOrigins();
 const nextConfig = {
   poweredByHeader: false,
   experimental: {
-    // Prevent CSRF false-positives behind Coolify / Cloudflare when Host differs.
+    // Prevent CSRF false-positives behind reverse proxies when Host differs.
     ...(allowedOrigins.length > 0
       ? { serverActions: { allowedOrigins } }
       : {}),

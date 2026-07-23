@@ -4,23 +4,12 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 
-# Runtime deps + build toolchain only in this stage.
-# No --include=dev / no NODE_ENV=development — Coolify-safe under production.
-RUN npm ci --omit=dev \
- && npm install --no-save \
-      typescript@5.9.3 \
-      tailwindcss@4.3.3 \
-      @tailwindcss/postcss@4.3.3 \
-      @types/node@20.19.43 \
-      @types/react@19.2.17 \
-      @types/react-dom@19.2.3 \
-      @types/bcryptjs@2.4.6 \
-      @types/ws@8.18.1
+# Full install so typescript / build tooling are available
+RUN npm ci
 
 COPY . .
 
-# Build-time placeholders only. Coolify injects ARG/build-args for all env vars —
-# never let real secrets (esp. bcrypt `$2b$…`) into this stage; `$` breaks Docker/Compose.
+# Build-time placeholders only — never bake real secrets into the image.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1
 
@@ -42,7 +31,6 @@ ENV NODE_ENV=production \
 
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
-# Runtime deps only — next.config.mjs needs no TypeScript.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 

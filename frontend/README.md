@@ -24,29 +24,19 @@ npm run dev
 
 `npm run dev:next` runs Turbopack without the WS proxy (HTTP features only).
 
-### Coolify (recommended): one monorepo Compose
+### Coolify (Core + Dashboard)
 
-Prefer the **root** single-resource stack — Postgres + Redis + Core + Dashboard on one project network (no `linkforty_shared`):
+Use the **root** single-resource stack — see [`../COOLIFY.md`](../COOLIFY.md):
 
 - Compose: [`../docker-compose.coolify.yml`](../docker-compose.coolify.yml)
 - Env: [`../.env.coolify.example`](../.env.coolify.example)
-- Guide: [`../COOLIFY.md`](../COOLIFY.md)
-
-Coolify Domains (FQDN + container port):
-
-| Service | Example |
-|---|---|
-| `linkforty` | `https://links.example.com:3000` |
-| `dashboard` | `https://dashboard.example.com:3001` |
 
 ```text
 AUTH_URL=https://dashboard.example.com          # no :3001
 SHORTLINK_BASE_URL=https://links.example.com
-CORE_URL=http://linkforty:3000                  # Docker DNS on same compose
-CORS_ORIGIN=https://dashboard.example.com       # set on Core
+CORE_URL=http://linkforty:3000                  # Docker DNS
+CORS_ORIGIN=https://dashboard.example.com       # on Core
 ```
-
-Do **not** deploy two Coolify Compose stacks for Core + dashboard — that caused bad Docker DNS and Traefik wrong-network 502s. See [`COOLIFY.md`](../COOLIFY.md).
 
 ### Docker (UI image only — local / external Core)
 
@@ -84,7 +74,7 @@ Generate a password hash:
 node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"
 ```
 
-**Coolify / Compose + bcrypt:** hashes contain `$` (`$2b$12$…`). Compose treats `$name` as variable interpolation (log noise like `zU2dGbpZ0j variable is not set`). In Coolify env UI, escape every `$` as `$$`, **or** paste the hash only as a runtime secret (not into raw compose YAML). Example:
+**Compose + bcrypt:** hashes contain `$`. Escape every `$` as `$$` in compose env (see [`COOLIFY.md`](../COOLIFY.md)):
 
 ```text
 ADMIN_PASSWORD_HASH=$$2b$$12$$…yourhash…
@@ -126,14 +116,14 @@ Browser must not call Core for management APIs. Use Server Components / Actions 
 ## Production checklist
 
 1. Set Core `CORS_ORIGIN` to this dashboard origin **only** (no `*`).
-2. Keep Core private for management; expose only the dashboard BFF. Prefer root `docker-compose.coolify.yml` (one network) over two stacks + `linkforty_shared`.
+2. Keep Core private for management; expose only the dashboard BFF. Prefer root `docker-compose.coolify.yml` for Coolify.
 3. Set `SHORTLINK_BASE_URL` to the public shortlink domain so the UI never prints a private `CORE_URL`.
 4. Use `ADMIN_PASSWORD_HASH` (bcrypt) — never plain `ADMIN_PASSWORD` in production.
 5. Set `AUTH_URL` to the public **dashboard** URL (separate host from shortlinks); keep `AUTH_SECRET` long.
 6. Point shortlink / AASA / assetlinks domains at Core; verify `/api/sdk/v1/health` (not `/health`) on `/settings`.
 7. Run with `node server.mjs` (or Docker image CMD) so live WS proxy works.
 8. Confirm browser never calls Core for `/api/*` management (Playwright security suite).
-9. On Coolify: follow [`COOLIFY.md`](../COOLIFY.md); set `JWT_SECRET`; do not publish Postgres/Redis ports.
+9. On Coolify: follow [`COOLIFY.md`](../COOLIFY.md); alphanumeric `POSTGRES_PASSWORD`; do not publish Postgres/Redis ports.
 
 ## Troubleshooting: `unexpected response` / 403 on `/links/new`
 

@@ -1,6 +1,5 @@
 # Single Coolify resource: Postgres + Redis + Core + Dashboard.
-# All four share the default project network → CORE_URL=http://linkforty:3000 works
-# without an external linkforty_shared network.
+# All four share the default project network → CORE_URL=http://linkforty:3000.
 #
 # Coolify UI:
 #   Resource type: Docker Compose
@@ -10,9 +9,10 @@
 #     dashboard  → https://dashboard.example.com:3001
 #   AUTH_URL = https://dashboard.example.com  (no :3001)
 #   SHORTLINK_BASE_URL = https://links.example.com
-#   ADMIN_PASSWORD_HASH: escape every $ as $$ in Coolify env UI (see COOLIFY.md)
+#   POSTGRES_PASSWORD: alphanumeric only (Compose interpolates DATABASE_URL)
+#   ADMIN_PASSWORD_HASH: escape every $ as $$ (see COOLIFY.md)
 #
-# See COOLIFY.md for full setup.
+# See COOLIFY.md for setup.
 
 services:
   postgres:
@@ -23,7 +23,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Coolify: keep DB internal — no host port publish
     expose:
       - "5432"
     healthcheck:
@@ -38,7 +37,6 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    # Coolify: keep Redis internal — no host port publish
     expose:
       - "6379"
     healthcheck:
@@ -58,42 +56,24 @@ services:
       redis:
         condition: service_healthy
     environment:
-      # Discrete PG vars — do NOT build DATABASE_URL here. Compose/Coolify
-      # interpolation mangles passwords with $ @ # / while postgres still gets
-      # the raw POSTGRES_PASSWORD → 28P01 "password authentication failed".
-      PGHOST: postgres
-      PGPORT: "5432"
-      DATABASE_SSL: "false"
-      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkforty}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-linkforty}?sslmode=disable
       REDIS_URL: redis://redis:6379
       NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"
       HOST: "0.0.0.0"
-      # Required — empty ${JWT_SECRET} expands badly in Coolify
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      # Dashboard public origin (not *). Comma-separated if multiple.
       CORS_ORIGIN: ${CORS_ORIGIN:-https://dashboard.example.com}
-      # Behind Coolify/Traefik — trust X-Forwarded-For
       TRUST_PROXY: ${TRUST_PROXY:-1}
       SHORTLINK_DOMAIN: ${SHORTLINK_DOMAIN:-}
-    # Coolify routes via Traefik — expose only (no host bind)
     expose:
       - "3000"
     labels:
-      # Multi-network: force Traefik onto Coolify proxy net
-      # Do NOT set loadbalancer.server.port — Coolify UI Domains owns that
       - traefik.docker.network=coolify
     networks:
       - default
       - coolify
     restart: unless-stopped
     healthcheck:
-      # Prefer committed probe script (fetch). curl also installed for Coolify UI
-      # probes that still expect curl/wget. Path must be /api/sdk/v1/health.
-      # If deploy fails in <1s with "is unhealthy" (not "exited"), Coolify is
-      # ignoring start_period — check UI healthcheck overrides (see COOLIFY.md).
       test: ["CMD", "node", "/app/docker-healthcheck.mjs"]
       interval: 10s
       timeout: 5s
@@ -106,13 +86,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      # service_started — NOT service_healthy. Coolify often marks linkforty
-      # "unhealthy" in <1s (UI HC override / ignored start_period) while the
-      # process is still migrating. Crash still surfaces as "exited (N)".
       linkforty:
-        condition: service_started
+        condition: service_healthy
     environment:
-      # Same compose network — stable Docker DNS (no shared external net)
       CORE_URL: ${CORE_URL:-http://linkforty:3000}
       SHORTLINK_BASE_URL: ${SHORTLINK_BASE_URL:-}
       CORE_API_TOKEN: ${CORE_API_TOKEN:-}
@@ -120,15 +96,13 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:3001}
       AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
-      # Pass-through (no ${VAR:-} default). Bcrypt has `$` — Coolify/.env must
-      # escape every `$` as `$$` or compose eats hash chunks (e.g. zU2dGbpZ0j).
+      # Pass-through (no default). Bcrypt `$` → escape as `$$` in env UI.
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       OPERATOR_USER_ID: ${OPERATOR_USER_ID:?OPERATOR_USER_ID is required}
       NODE_ENV: production
       PORT: "3001"
       HOST: "0.0.0.0"
-    # Coolify routes via Traefik — expose only
     expose:
       - "3001"
     labels:
@@ -138,7 +112,6 @@ services:
       - coolify
     restart: unless-stopped
     healthcheck:
-      # node:22-alpine has no wget/curl — use node so Coolify/Traefik see healthy
       test:
         [
           "CMD",
@@ -158,6 +131,5 @@ volumes:
     driver: local
 
 networks:
-  # Coolify reverse-proxy network (exists on Coolify hosts)
   coolify:
     external: true

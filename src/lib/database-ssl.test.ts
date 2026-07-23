@@ -36,7 +36,7 @@ describe('resolvePoolSsl', () => {
     ).toBe(false);
   });
 
-  it('defaults to no SSL when there is no URL (discrete Coolify config)', () => {
+  it('defaults to no SSL when there is no URL (discrete PG config)', () => {
     delete process.env.DATABASE_SSL;
     expect(resolvePoolSsl('')).toBe(false);
   });
