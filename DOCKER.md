@@ -214,7 +214,7 @@ docker-compose logs -f linkforty
 
 Run migrations manually:
 ```bash
-docker-compose exec linkforty tsx dist/scripts/migrate.js
+docker-compose exec linkforty node dist/scripts/migrate.js
 ```
 
 ### Port already in use

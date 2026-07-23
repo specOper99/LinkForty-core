@@ -1,18 +1,28 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-alpine AS deps
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+
+# Runtime deps + build toolchain only in this stage.
+# No --include=dev / no NODE_ENV=development — Coolify-safe under production.
+RUN npm ci --omit=dev \
+ && npm install --no-save \
+      typescript@5.9.3 \
+      tailwindcss@4.3.3 \
+      @tailwindcss/postcss@4.3.3 \
+      @types/node@20.19.43 \
+      @types/react@19.2.17 \
+      @types/react-dom@19.2.3 \
+      @types/bcryptjs@2.4.6 \
+      @types/ws@8.18.1
+
 COPY . .
 
 # Build-time placeholders only. Coolify injects ARG/build-args for all env vars —
 # never let real secrets (esp. bcrypt `$2b$…`) into this stage; `$` breaks Docker/Compose.
-ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
 
 RUN CORE_URL=http://127.0.0.1:3000 \
     AUTH_SECRET=build-time-placeholder-not-used \
@@ -32,13 +42,16 @@ ENV NODE_ENV=production \
 
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/next.config.ts ./next.config.ts
+# Runtime deps only — next.config.mjs needs no TypeScript.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/server.mjs ./server.mjs
-COPY --from=builder /app/src ./src
+
+RUN chown -R nextjs:nodejs /app
 
 USER nextjs
 EXPOSE 3001

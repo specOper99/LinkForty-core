@@ -58,7 +58,15 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-linkforty}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-linkforty}?sslmode=disable
+      # Discrete PG vars — do NOT build DATABASE_URL here. Compose/Coolify
+      # interpolation mangles passwords with $ @ # / while postgres still gets
+      # the raw POSTGRES_PASSWORD → 28P01 "password authentication failed".
+      PGHOST: postgres
+      PGPORT: "5432"
+      DATABASE_SSL: "false"
+      POSTGRES_USER: ${POSTGRES_USER:-linkforty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-linkforty}
       REDIS_URL: redis://redis:6379
       NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"

@@ -102,14 +102,18 @@ Look for:
 
 | Log / inspect signal | Meaning |
 |---|---|
-| `Migration failed:` / auth errors | Bad `POSTGRES_*` or password with `@ : / # $` |
-| `DATABASE_URL empty/unset` | Coolify UI injected empty `DATABASE_URL` — clear it; let compose build the URL |
+| `Migration failed:` / `28P01` auth | Password mangled via old Compose `DATABASE_URL` (`$ @ #`), or stale postgres volume. Omit `DATABASE_URL`; compose uses `PGHOST` + `POSTGRES_*`. Wipe volume after password change. Prefer alphanumeric `POSTGRES_PASSWORD`. |
+| `DATABASE_URL empty/unset` | Coolify UI injected empty `DATABASE_URL` — clear it; let compose set `PGHOST` + `POSTGRES_*` |
 | `Server listening` + Health `unhealthy` | Probe/path/override problem — not a crash |
-| No logs / instant exit | `docker inspect` State.ExitCode; check CMD/`tsx` |
+| No logs / instant exit | `docker inspect` State.ExitCode; check CMD/`node` |
 
 **Coolify UI:** If the resource has a custom Healthcheck (curl/wget to `/`), either disable it and rely on compose, or set path to `/api/sdk/v1/health`, long start period (≥90s), retries ≥5. Image includes `curl` + `node /app/docker-healthcheck.mjs`.
 
-**`NODE_ENV` tip:** set `NODE_ENV=production` as **Runtime only** (uncheck Available at Buildtime). Coolify may inject 50+ ARGs into the Dockerfile; Core ignores them for build, but build-time `NODE_ENV=production` triggers Coolify warnings. Secrets (`JWT_SECRET`, `ADMIN_PASSWORD_HASH`, …) must be runtime-only too — `$` in bcrypt breaks `--build-arg`.
+**`NODE_ENV` tip:** set `NODE_ENV=production` as **Runtime only** (uncheck Available at Buildtime). Coolify may inject 50+ ARGs into the Dockerfile. Core/dashboard Dockerfiles use `npm ci --omit=dev` only; the builder stage adds the compiler with `npm install --no-save` (never `--include=dev` / never `NODE_ENV=development`). Secrets (`JWT_SECRET`, `ADMIN_PASSWORD_HASH`, …) must be runtime-only too — `$` in bcrypt breaks `--build-arg`.
+
+### Dashboard: `Failed to install TypeScript` / `EACCES … node_modules`
+
+Next was loading `next.config.ts` at runtime as non-root `nextjs`, then auto-`yarn add typescript` → permission denied. Dashboard now uses `next.config.mjs` and a runner image with prod deps only. Redeploy after pulling this fix.
 
 ## Local verify (optional)
 

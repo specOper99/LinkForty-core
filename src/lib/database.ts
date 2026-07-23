@@ -26,9 +26,10 @@ function sleep(ms: number): Promise<void> {
  * the exited container as "unhealthy".
  *
  * Honor `?sslmode=` in the URL (disable / require / verify-*) or DATABASE_SSL.
+ * When there is no URL (discrete PG* / POSTGRES_* config), only DATABASE_SSL applies.
  */
 export function resolvePoolSsl(
-  connectionString: string
+  connectionString: string = ''
 ): false | { rejectUnauthorized: boolean } {
   const sslEnv = (process.env.DATABASE_SSL || '').toLowerCase();
   if (sslEnv === '0' || sslEnv === 'false' || sslEnv === 'disable') return false;
@@ -48,6 +49,65 @@ export function resolvePoolSsl(
     return { rejectUnauthorized: true };
   }
   return false;
+}
+
+export type ResolvedDbConfig =
+  | { mode: 'url'; connectionString: string; ssl: false | { rejectUnauthorized: boolean } }
+  | {
+      mode: 'discrete';
+      host: string;
+      port: number;
+      user: string;
+      password: string;
+      database: string;
+      ssl: false | { rejectUnauthorized: boolean };
+    };
+
+/**
+ * Prefer DATABASE_URL (Fly / managed). Else discrete host + POSTGRES_* / PG*
+ * (Coolify Compose). Never embed password in a Compose-interpolated URL —
+ * `$` / `@` / `#` get mangled while the postgres container still sees the raw
+ * POSTGRES_PASSWORD Coolify injects → 28P01 auth failures.
+ */
+export function resolveDatabaseConfig(options: DatabaseOptions = {}): ResolvedDbConfig {
+  const fromOptions = options.url?.trim();
+  const fromEnv = process.env.DATABASE_URL?.trim();
+  if (fromOptions || fromEnv) {
+    const connectionString = (fromOptions || fromEnv)!;
+    return {
+      mode: 'url',
+      connectionString,
+      ssl: resolvePoolSsl(connectionString),
+    };
+  }
+
+  const host = (process.env.PGHOST || '').trim();
+  const user = (process.env.POSTGRES_USER || process.env.PGUSER || '').trim();
+  const password = process.env.POSTGRES_PASSWORD ?? process.env.PGPASSWORD ?? '';
+  const database = (
+    process.env.POSTGRES_DB ||
+    process.env.PGDATABASE ||
+    ''
+  ).trim();
+
+  if (host && user) {
+    const port = Number(process.env.PGPORT || 5432);
+    return {
+      mode: 'discrete',
+      host,
+      port: Number.isFinite(port) ? port : 5432,
+      user,
+      password,
+      database: database || 'linkforty',
+      ssl: resolvePoolSsl(''),
+    };
+  }
+
+  return {
+    mode: 'url',
+    connectionString: 'postgresql://postgres:password@localhost:5432/linkforty',
+    ssl: resolvePoolSsl('postgresql://postgres:password@localhost:5432/linkforty'),
+  };
 }
 
 function isTransientDbError(error: { code?: string; message?: string }): boolean {
@@ -90,24 +150,44 @@ async function connectWithRetry(maxRetries: number = 10, baseDelay: number = 100
 
 // Initialize database schema
 export async function initializeDatabase(options: DatabaseOptions = {}) {
-  const fromOptions = options.url?.trim();
-  const fromEnv = process.env.DATABASE_URL?.trim();
-  const connectionString =
-    fromOptions || fromEnv || 'postgresql://postgres:password@localhost:5432/linkforty';
+  const resolved = resolveDatabaseConfig(options);
 
-  if (!fromOptions && !fromEnv) {
+  if (
+    resolved.mode === 'url' &&
+    !options.url?.trim() &&
+    !process.env.DATABASE_URL?.trim() &&
+    !process.env.PGHOST?.trim()
+  ) {
     console.warn(
-      'DATABASE_URL empty/unset — using localhost fallback. On Coolify, do not set empty DATABASE_URL in UI; let compose build postgresql://…@postgres/…?sslmode=disable'
+      'DATABASE_URL / PGHOST unset — using localhost fallback. On Coolify, set POSTGRES_* and omit DATABASE_URL; compose sets PGHOST=postgres'
     );
   }
 
-  // Initialize pool — SSL from URL/env only (see resolvePoolSsl)
-  db = new Pool({
-    connectionString,
-    ssl: resolvePoolSsl(connectionString),
-    min: options.pool?.min || 2,
-    max: options.pool?.max || 10,
-  });
+  if (resolved.mode === 'url') {
+    console.log(
+      `Database config: connectionString (ssl=${JSON.stringify(resolved.ssl)})`
+    );
+    db = new Pool({
+      connectionString: resolved.connectionString,
+      ssl: resolved.ssl,
+      min: options.pool?.min || 2,
+      max: options.pool?.max || 10,
+    });
+  } else {
+    console.log(
+      `Database config: ${resolved.user}@${resolved.host}:${resolved.port}/${resolved.database} (ssl=${JSON.stringify(resolved.ssl)})`
+    );
+    db = new Pool({
+      host: resolved.host,
+      port: resolved.port,
+      user: resolved.user,
+      password: resolved.password,
+      database: resolved.database,
+      ssl: resolved.ssl,
+      min: options.pool?.min || 2,
+      max: options.pool?.max || 10,
+    });
+  }
 
   const client = await connectWithRetry();
 

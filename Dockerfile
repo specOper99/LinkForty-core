@@ -3,7 +3,6 @@
 # Coolify injects ARG for every env var (JWT_SECRET, DATABASE_URL, …). This
 # Dockerfile never references those ARGs — do not ENV them into the image.
 # Runtime secrets come only from compose `environment:` / Coolify runtime env.
-# NODE_ENV at build can be production; pin development on the npm ci RUN below.
 FROM node:22-alpine AS builder
 
 WORKDIR /app
@@ -11,16 +10,22 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (including devDependencies for build).
-# Coolify may inject NODE_ENV=production as a build-arg/ENV — pin development
-# on this RUN so TypeScript/devDeps still install. prepare is skipped via --ignore-scripts.
-RUN NODE_ENV=development npm ci --ignore-scripts
+# Prod deps + compiler only in this stage (library keeps typescript in
+# package.json devDependencies so npm publish stays clean).
+RUN npm ci --omit=dev --ignore-scripts \
+ && npm install --no-save --ignore-scripts \
+      typescript@5.9.3 \
+      @types/node@20.19.24 \
+      @types/pg@8.15.6 \
+      @types/geoip-lite@1.4.4 \
+      @types/qrcode@1.5.6 \
+      @types/ua-parser-js@0.7.39
 
 # Copy source files
 COPY . .
 
-# Build TypeScript
-RUN npm run build
+# Build TypeScript → dist/
+RUN npx tsc
 
 # Production stage
 FROM node:22-alpine
@@ -37,19 +42,16 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install production dependencies only (ignore Coolify-injected NODE_ENV)
-RUN NODE_ENV=production npm ci --omit=dev --ignore-scripts && \
+# Production dependencies only — no typescript, no tsx
+RUN npm ci --omit=dev --ignore-scripts && \
     npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
-# Copy example server + health probe (no wget required)
-COPY examples/basic-server.ts ./
+# Plain JS entry (no tsx / no runtime TypeScript)
+COPY examples/basic-server.mjs ./
 COPY scripts/docker-healthcheck.mjs ./docker-healthcheck.mjs
-
-# Install tsx globally for running TypeScript
-RUN npm install -g tsx
 
 # Change ownership to non-root user
 RUN chown -R linkforty:linkforty /app
@@ -70,4 +72,4 @@ ENTRYPOINT ["dumb-init", "--"]
 
 # Migrate then serve. Non-zero migrate exit → container exits (Compose: "exited").
 # "is unhealthy" in <1s with start_period set usually means HC override / no start_period.
-CMD ["sh", "-c", "tsx dist/scripts/migrate.js && exec tsx basic-server.ts"]
+CMD ["sh", "-c", "node dist/scripts/migrate.js && exec node basic-server.mjs"]

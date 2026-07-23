@@ -1,7 +1,6 @@
-import type { NextConfig } from "next";
-
-function serverActionOrigins(): string[] {
-  const origins = new Set<string>();
+/** @type {import('next').NextConfig} */
+function serverActionOrigins() {
+  const origins = new Set();
   const authUrl = process.env.AUTH_URL?.trim();
   if (authUrl) {
     try {
@@ -22,7 +21,7 @@ function serverActionOrigins(): string[] {
 
 const allowedOrigins = serverActionOrigins();
 
-const nextConfig: NextConfig = {
+const nextConfig = {
   poweredByHeader: false,
   experimental: {
     // Prevent CSRF false-positives behind Coolify / Cloudflare when Host differs.
