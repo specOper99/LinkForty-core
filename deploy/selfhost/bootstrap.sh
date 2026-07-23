@@ -75,11 +75,60 @@ print(base64.b64encode(h).decode())
 PY
 }
 
+compose_up() {
+  local args=(compose -f "$REPO_ROOT/docker-compose.selfhost.yml" --env-file "$REPO_ROOT/.env" up --build -d --force-recreate --remove-orphans)
+  if groups | grep -qw docker 2>/dev/null || [[ -w /var/run/docker.sock ]]; then
+    docker "${args[@]}"
+  else
+    echo "  docker group not active in this shell — using sudo"
+    sudo docker "${args[@]}"
+  fi
+}
+
+wait_healthy() {
+  echo "  waiting for health..."
+  for i in $(seq 1 36); do
+    if curl -sfS "http://127.0.0.1:3000/api/sdk/v1/health" >/dev/null 2>&1 \
+      && curl -sfS -o /dev/null "http://127.0.0.1:3001/login" 2>/dev/null; then
+      echo "  Core + Dashboard responding on localhost"
+      return 0
+    fi
+    # surface redis/postgres failures early
+    if command -v docker >/dev/null 2>&1; then
+      local bad
+      bad="$(docker compose -f "$REPO_ROOT/docker-compose.selfhost.yml" ps --format '{{.Name}} {{.Status}}' 2>/dev/null | grep -Ei 'unhealthy|Exit' || true)"
+      if [[ -n "$bad" && "$i" -ge 3 ]]; then
+        echo "  unhealthy/exited:"
+        echo "$bad"
+        docker compose -f "$REPO_ROOT/docker-compose.selfhost.yml" logs --tail 40 redis postgres 2>/dev/null || true
+      fi
+    fi
+    sleep 5
+    echo "  ... still starting ($i)"
+  done
+  return 1
+}
+
 echo "=============================================="
 echo " LinkForty self-host interactive bootstrap"
 echo " Repo: $REPO_ROOT"
 echo "=============================================="
 echo
+
+# Fast path: fix/redeploy without re-prompting secrets
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  prompt_yn REDEPLOY_ONLY "Redeploy stack only (keep .env, skip host/domain prompts)?" "n"
+  if [[ "$REDEPLOY_ONLY" == "y" ]]; then
+    echo "==> docker compose up --build -d --force-recreate"
+    compose_up
+    wait_healthy || true
+    echo
+    echo "Done. Probe:"
+    echo "  curl -sfS http://127.0.0.1:3000/api/sdk/v1/health"
+    echo "  curl -sfS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3001/login"
+    exit 0
+  fi
+fi
 
 # --- interactive config ---
 prompt SHORTLINK_DOMAIN "Shortlink domain (Core)" "links.example.com"
@@ -302,23 +351,9 @@ if [[ "$DO_COMPOSE" == "y" ]]; then
     echo "ERROR: .env missing — cannot start compose. Re-run with Write .env = y"
     exit 1
   fi
-  echo "==> docker compose up --build -d"
-  if groups | grep -qw docker 2>/dev/null || [[ -w /var/run/docker.sock ]]; then
-    docker compose -f "$REPO_ROOT/docker-compose.selfhost.yml" --env-file "$REPO_ROOT/.env" up --build -d
-  else
-    echo "  docker group not active in this shell — using sudo"
-    sudo docker compose -f "$REPO_ROOT/docker-compose.selfhost.yml" --env-file "$REPO_ROOT/.env" up --build -d
-  fi
-  echo "  waiting for health..."
-  for i in $(seq 1 36); do
-    if curl -sfS "http://127.0.0.1:3000/api/sdk/v1/health" >/dev/null 2>&1 \
-      && curl -sfS -o /dev/null "http://127.0.0.1:3001/login" 2>/dev/null; then
-      echo "  Core + Dashboard responding on localhost"
-      break
-    fi
-    sleep 5
-    echo "  ... still starting ($i)"
-  done
+  echo "==> docker compose up --build -d --force-recreate"
+  compose_up
+  wait_healthy || true
 fi
 
 # --- SSH harden (optional, dangerous) ---
