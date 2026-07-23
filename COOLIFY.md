@@ -45,7 +45,9 @@ linkforty ────────────► postgres, redis
 
 **Leave `DATABASE_URL` unset** in the Coolify UI — compose passes `PGHOST` + `POSTGRES_*` (avoids URL-mangled passwords). Do not publish Postgres/Redis host ports.
 
-**Postgres volume:** `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` only apply on **first** init. After change: wipe the postgres volume in Coolify (or `docker volume rm …_postgres-data`) then redeploy. Log line `Skipping initialization` = old credentials still on disk.
+**Postgres volume:** `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` only apply on **first** init. After change: wipe the postgres volume in Coolify (or `docker volume rm …_postgres_data`) then redeploy. Log line `Skipping initialization` = old credentials still on disk — **redeploy alone never fixes this**.
+
+Postgres healthcheck uses `pg_isready -U … -d …`. Without `-d`, `pg_isready` defaults DB name to the username (`mediazan`) and spams `database "mediazan" does not exist` even when DB `linkforty` is fine.
 
 If the Coolify resource has a custom **Healthcheck** (curl/wget to `/`), disable it and rely on compose — or set path `/api/sdk/v1/health`, start period ≥90s, retries ≥5.
 
