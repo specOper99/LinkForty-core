@@ -95,8 +95,10 @@ export function pickMobileFallbackUrl(
  * The JavaScript reads the URL fragment (window.location.hash) and appends it
  * to the scheme URL. This preserves the E2E encryption key, which lives only
  * in the fragment and is never sent to the server.
+ *
+ * Store fallback is cancelled if the page hides/blurs (app likely opened).
  */
-function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string, title?: string): string {
+export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string, title?: string): string {
   const safeSchemeUrl = schemeUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const safeFallbackUrl = fallbackUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const safeTitle = (title || 'the app').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -126,12 +128,25 @@ function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string, title?
   <a class="btn btn-secondary" id="store-btn" href="${safeFallbackUrl}">Download App</a>
 </div>
 <script>
-  // Preserve URL fragment (E2E encryption key) through the scheme redirect
   var hash = window.location.hash || '';
   var schemeUrl = "${safeSchemeUrl}" + hash;
+  var fallbackUrl = "${safeFallbackUrl}";
+  var storeTimer = null;
+  function cancelStore() {
+    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+  }
+  function goStore() {
+    storeTimer = null;
+    window.location.replace(fallbackUrl);
+  }
   document.getElementById('open-btn').href = schemeUrl;
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') cancelStore();
+  });
+  window.addEventListener('pagehide', cancelStore);
+  window.addEventListener('blur', cancelStore);
   window.location = schemeUrl;
-  setTimeout(function() { window.location.replace("${safeFallbackUrl}"); }, 1500);
+  storeTimer = setTimeout(goStore, 2500);
 </script>
 </body></html>`;
 }

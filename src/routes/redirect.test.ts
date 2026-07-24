@@ -3,6 +3,7 @@ import {
   isIOSInAppBrowser,
   isAndroidInAppBrowser,
   pickMobileFallbackUrl,
+  generateInterstitialHTML,
 } from './redirect.js';
 
 // Real-world UA strings (truncated where helpful) for use across test cases.
@@ -182,5 +183,31 @@ describe('pickMobileFallbackUrl — reporter scenario regression test', () => {
   it('Android Facebook in-app → web fallback (preserves UL second-chance)', () => {
     const r = pickMobileFallbackUrl('android', UA.androidFacebook, URLS.iosStore, URLS.androidStore, URLS.webFallback);
     expect(r?.url).toBe(URLS.webFallback);
+  });
+});
+
+describe('generateInterstitialHTML', () => {
+  const html = generateInterstitialHTML(
+    'myapp://product/1',
+    'https://apps.apple.com/app/id123',
+    'Demo',
+  );
+
+  it('embeds scheme and store fallback', () => {
+    expect(html).toContain('myapp://product/1');
+    expect(html).toContain('https://apps.apple.com/app/id123');
+  });
+
+  it('cancels store timer on hide/blur/pagehide', () => {
+    expect(html).toContain('function cancelStore()');
+    expect(html).toContain("visibilitychange");
+    expect(html).toContain("pagehide");
+    expect(html).toContain("blur");
+    expect(html).toContain('cancelStore()');
+  });
+
+  it('uses 2500ms store timeout (not unconditional 1500ms replace)', () => {
+    expect(html).toContain('setTimeout(goStore, 2500)');
+    expect(html).not.toMatch(/setTimeout\(function\(\)\s*\{\s*window\.location\.replace/);
   });
 });

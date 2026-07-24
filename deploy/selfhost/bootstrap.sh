@@ -189,6 +189,47 @@ wait_healthy() {
   return 1
 }
 
+# Probe public shortlink .well-known when mobile env is present (shortlink host, not dashboard).
+probe_well_known() {
+  local base="" envf="$REPO_ROOT/.env"
+  [[ -f "$envf" ]] || return 0
+
+  if grep -qE '^SHORTLINK_BASE_URL=https?://' "$envf"; then
+    base="$(grep -E '^SHORTLINK_BASE_URL=' "$envf" | head -1 | cut -d= -f2- | tr -d '\r' | sed 's|/$||')"
+  fi
+  [[ -n "$base" ]] || return 0
+
+  local has_ios=0 has_android=0
+  grep -qE '^IOS_TEAM_ID=.+' "$envf" && grep -qE '^IOS_BUNDLE_ID=.+' "$envf" && has_ios=1
+  grep -qE '^ANDROID_PACKAGE_NAME=.+' "$envf" && grep -qE '^ANDROID_SHA256_FINGERPRINTS=.+' "$envf" && has_android=1
+  [[ "$has_ios" -eq 1 || "$has_android" -eq 1 ]] || return 0
+
+  echo "==> Probing .well-known on shortlink host ($base)"
+  if [[ "$has_ios" -eq 1 ]]; then
+    if curl -sfS "$base/.well-known/apple-app-site-association" | grep -q applinks; then
+      echo "  OK  $base/.well-known/apple-app-site-association"
+    else
+      echo "  FAIL $base/.well-known/apple-app-site-association"
+      echo "       Check IOS_* in Core container; use shortlink host (not dashboard)."
+      echo "       curl -sS -D- $base/.well-known/apple-app-site-association | head -40"
+    fi
+    if curl -sfS "$base/apple-app-site-association" | grep -q applinks; then
+      echo "  OK  $base/apple-app-site-association"
+    else
+      echo "  FAIL $base/apple-app-site-association"
+    fi
+  fi
+  if [[ "$has_android" -eq 1 ]]; then
+    if curl -sfS "$base/.well-known/assetlinks.json" | grep -q package_name; then
+      echo "  OK  $base/.well-known/assetlinks.json"
+    else
+      echo "  FAIL $base/.well-known/assetlinks.json"
+      echo "       Check ANDROID_* in Core container; fingerprints must match signing cert."
+      echo "       curl -sS -D- $base/.well-known/assetlinks.json | head -40"
+    fi
+  fi
+}
+
 echo "=============================================="
 echo " LinkForty self-host interactive bootstrap"
 echo " Repo: $REPO_ROOT"
@@ -208,15 +249,16 @@ if [[ -f "$REPO_ROOT/.env" ]]; then
     echo "==> docker compose up --build -d --force-recreate"
     compose_up
     wait_healthy || true
+    probe_well_known
     echo
     echo "Done. Probe:"
     echo "  curl -sfS http://127.0.0.1:3000/api/sdk/v1/health"
     echo "  curl -sfS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3001/login"
     if grep -qE '^IOS_TEAM_ID=.+' "$REPO_ROOT/.env" 2>/dev/null; then
-      echo "  curl -sfS https://YOUR_SHORTLINK_HOST/.well-known/apple-app-site-association"
+      echo "  curl -sfS \$(grep SHORTLINK_BASE_URL .env | cut -d= -f2-)/.well-known/apple-app-site-association"
     fi
     if grep -qE '^ANDROID_PACKAGE_NAME=.+' "$REPO_ROOT/.env" 2>/dev/null; then
-      echo "  curl -sfS https://YOUR_SHORTLINK_HOST/.well-known/assetlinks.json"
+      echo "  curl -sfS \$(grep SHORTLINK_BASE_URL .env | cut -d= -f2-)/.well-known/assetlinks.json"
     fi
     exit 0
   fi
@@ -469,6 +511,7 @@ if [[ "$DO_COMPOSE" == "y" ]]; then
   echo "==> docker compose up --build -d --force-recreate"
   compose_up
   wait_healthy || true
+  probe_well_known
 fi
 
 # --- SSH harden (optional, dangerous) ---
@@ -516,6 +559,8 @@ echo "=============================================="
 echo "  Dashboard : https://${DASHBOARD_DOMAIN}"
 echo "  Shortlinks: https://${SHORTLINK_DOMAIN}"
 echo "  Health    : https://${SHORTLINK_DOMAIN}/api/sdk/v1/health"
+echo "  AASA      : https://${SHORTLINK_DOMAIN}/.well-known/apple-app-site-association"
+echo "  Assetlinks: https://${SHORTLINK_DOMAIN}/.well-known/assetlinks.json"
 echo "  Login     : https://${DASHBOARD_DOMAIN}/login"
 echo "  User      : ${ADMIN_USERNAME}"
 echo "  .env      : $REPO_ROOT/.env"

@@ -2,6 +2,7 @@
 #
 # Apps bind 127.0.0.1 only — put Caddy on host for :80/:443 TLS.
 # See deploy/selfhost/bootstrap.sh (writes Caddyfile.generated + .env).
+# .well-known ops: deploy/selfhost/WELLKNOWN.md
 #
 #   cp deploy/selfhost/env.example .env
 #   # fill secrets + real domains

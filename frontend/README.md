@@ -121,6 +121,10 @@ Browser must not call Core for management APIs. Use Server Components / Actions 
 4. Use `ADMIN_PASSWORD_HASH` (bcrypt) — never plain `ADMIN_PASSWORD` in production.
 5. Set `AUTH_URL` to the public **dashboard** URL (separate host from shortlinks); keep `AUTH_SECRET` long.
 6. Point shortlink / AASA / assetlinks domains at Core; verify `/api/sdk/v1/health` (not `/health`) on `/settings`.
+   - `.well-known` lives on the **shortlink** origin (`SHORTLINK_BASE_URL`), never the dashboard host.
+   - Probe: `curl -sS https://links.example.com/.well-known/apple-app-site-association`
+   - If Core returns `"Configuration missing"`, set `IOS_*` / `ANDROID_*` and recreate Core.
+   - With `appScheme` set, Core serves an interstitial that tries the custom scheme then the store. If the app opens, the store timer is cancelled on blur/visibility; if Universal/App Links work, the OS opens the app and the browser never loads that interstitial.
 7. Run with `node server.mjs` (or Docker image CMD) so live WS proxy works.
 8. Confirm browser never calls Core for `/api/*` management (Playwright security suite).
 9. On Coolify: follow [`COOLIFY.md`](../COOLIFY.md); alphanumeric `POSTGRES_PASSWORD`; do not publish Postgres/Redis ports.
