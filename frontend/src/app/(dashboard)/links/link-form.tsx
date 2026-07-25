@@ -150,6 +150,7 @@ export function LinkForm({
             name="iosUniversalLink"
             type="url"
             defaultValue={link?.iosUniversalLink ?? ""}
+            placeholder="https://links.example.com/path (not App Store URL)"
           />
         </Field>
         <Field label="Android app link" htmlFor="androidAppLink">
@@ -158,6 +159,7 @@ export function LinkForm({
             name="androidAppLink"
             type="url"
             defaultValue={link?.androidAppLink ?? ""}
+            placeholder="https://links.example.com/path (not Play Store URL)"
           />
         </Field>
         <Field label="Deep link path" htmlFor="deepLinkPath">

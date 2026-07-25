@@ -4,6 +4,9 @@ import {
   isAndroidInAppBrowser,
   pickMobileFallbackUrl,
   generateInterstitialHTML,
+  buildAndroidIntentUrl,
+  isHttpsAppLink,
+  isMobileStoreUrl,
 } from './redirect.js';
 
 // Real-world UA strings (truncated where helpful) for use across test cases.
@@ -193,21 +196,41 @@ describe('generateInterstitialHTML', () => {
     'Demo',
   );
 
-  it('embeds scheme and store fallback', () => {
+  it('embeds scheme and store as buttons; tries iframe + location', () => {
     expect(html).toContain('myapp://product/1');
     expect(html).toContain('https://apps.apple.com/app/id123');
+    expect(html).toContain('id="open-btn"');
+    expect(html).toContain('createElement(\'iframe\')');
+    expect(html).toContain('window.location.href = openUrl');
+    expect(html).not.toContain('goStore');
+    expect(html).not.toContain('location.replace');
+  });
+});
+
+describe('buildAndroidIntentUrl', () => {
+  it('builds intent URL with scheme and package', () => {
+    const url = buildAndroidIntentUrl({
+      scheme: 'myapp',
+      path: 'product/1',
+      packageName: 'com.example.app',
+    });
+    expect(url).toBe(
+      'intent://product/1#Intent;scheme=myapp;package=com.example.app;end',
+    );
+  });
+});
+
+describe('isHttpsAppLink / isMobileStoreUrl', () => {
+  it('rejects App Store and Play URLs as app links', () => {
+    expect(isMobileStoreUrl('https://apps.apple.com/app/id123')).toBe(true);
+    expect(isMobileStoreUrl('https://play.google.com/store/apps/details?id=x')).toBe(true);
+    expect(isHttpsAppLink('https://apps.apple.com/app/id123')).toBe(false);
+    expect(isHttpsAppLink('https://play.google.com/store/apps/details?id=x')).toBe(false);
   });
 
-  it('cancels store timer on hide/blur/pagehide', () => {
-    expect(html).toContain('function cancelStore()');
-    expect(html).toContain("visibilitychange");
-    expect(html).toContain("pagehide");
-    expect(html).toContain("blur");
-    expect(html).toContain('cancelStore()');
-  });
-
-  it('uses 2500ms store timeout (not unconditional 1500ms replace)', () => {
-    expect(html).toContain('setTimeout(goStore, 2500)');
-    expect(html).not.toMatch(/setTimeout\(function\(\)\s*\{\s*window\.location\.replace/);
+  it('accepts https deep links on custom hosts', () => {
+    expect(isHttpsAppLink('https://links.example.com/abc')).toBe(true);
+    expect(isHttpsAppLink('http://links.example.com/abc')).toBe(false);
+    expect(isHttpsAppLink(null)).toBe(false);
   });
 });

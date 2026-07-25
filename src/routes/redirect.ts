@@ -89,19 +89,65 @@ export function pickMobileFallbackUrl(
 }
 
 /**
- * Generate an interstitial HTML page that tries to open the app via custom scheme,
- * then falls back to the App Store / Play Store.
- *
- * The JavaScript reads the URL fragment (window.location.hash) and appends it
- * to the scheme URL. This preserves the E2E encryption key, which lives only
- * in the fragment and is never sent to the server.
- *
- * Store fallback is cancelled if the page hides/blurs (app likely opened).
+ * True if URL is an App Store / Play Store listing (not a Universal/App Link).
+ */
+export function isMobileStoreUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === 'apps.apple.com' ||
+      host === 'itunes.apple.com' ||
+      host.endsWith('.apps.apple.com') ||
+      host === 'play.google.com' ||
+      host.endsWith('.play.google.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** HTTPS deep link suitable for OS Universal Links / App Links (not a store URL). */
+export function isHttpsAppLink(url: string | null | undefined): boolean {
+  if (!url?.trim()) return false;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    return !isMobileStoreUrl(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build a Chrome Intent URL for Android. Custom schemes often fail silently in
+ * Chrome; intent:// with package opens the app when installed.
+ * https://developer.chrome.com/docs/android/intents
+ */
+export function buildAndroidIntentUrl(opts: {
+  scheme: string;
+  path?: string;
+  packageName: string;
+  fallbackUrl?: string;
+}): string {
+  const scheme = opts.scheme.replace(/:\/\/*$/, '').replace(/:$/, '');
+  const path = (opts.path || '').replace(/^\//, '');
+  let intent = `intent://${path}#Intent;scheme=${encodeURIComponent(scheme)};package=${encodeURIComponent(opts.packageName)}`;
+  if (opts.fallbackUrl) {
+    intent += `;S.browser_fallback_url=${encodeURIComponent(opts.fallbackUrl)}`;
+  }
+  intent += ';end';
+  return intent;
+}
+
+/**
+ * Generate an interstitial that tries to open the app via custom scheme / intent.
+ * Store download is a button only — never auto-navigate to the store.
  */
 export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string, title?: string): string {
   const safeSchemeUrl = schemeUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const safeFallbackUrl = fallbackUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const safeTitle = (title || 'the app').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const isIntent = schemeUrl.startsWith('intent://');
 
   return `<!DOCTYPE html>
 <html><head>
@@ -123,30 +169,30 @@ export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string,
 <div class="container">
   <div class="spinner"></div>
   <h1>Opening ${safeTitle}...</h1>
-  <p>If the app doesn't open automatically:</p>
+  <p>If the app doesn't open automatically, tap below.</p>
   <a class="btn btn-primary" id="open-btn" href="${safeSchemeUrl}">Open App</a>
   <a class="btn btn-secondary" id="store-btn" href="${safeFallbackUrl}">Download App</a>
 </div>
 <script>
   var hash = window.location.hash || '';
-  var schemeUrl = "${safeSchemeUrl}" + hash;
-  var fallbackUrl = "${safeFallbackUrl}";
-  var storeTimer = null;
-  function cancelStore() {
-    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+  var openUrl = "${safeSchemeUrl}";
+  var isIntent = ${isIntent ? 'true' : 'false'};
+  if (hash && !isIntent) openUrl = openUrl + hash;
+  document.getElementById('open-btn').href = openUrl;
+  function tryOpen() {
+    // iOS: hidden iframe helps older Safari with custom schemes; then location.
+    if (!isIntent) {
+      try {
+        var iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = openUrl;
+        document.body.appendChild(iframe);
+        setTimeout(function() { try { document.body.removeChild(iframe); } catch (e) {} }, 2000);
+      } catch (e) {}
+    }
+    window.location.href = openUrl;
   }
-  function goStore() {
-    storeTimer = null;
-    window.location.replace(fallbackUrl);
-  }
-  document.getElementById('open-btn').href = schemeUrl;
-  document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'hidden') cancelStore();
-  });
-  window.addEventListener('pagehide', cancelStore);
-  window.addEventListener('blur', cancelStore);
-  window.location = schemeUrl;
-  storeTimer = setTimeout(goStore, 2500);
+  setTimeout(tryOpen, 50);
 </script>
 </body></html>`;
 }
@@ -484,34 +530,33 @@ export async function redirectRoutes(fastify: FastifyInstance) {
 
     if (device === 'ios') {
       // iOS Priority:
-      // 1. Universal Link (HTTPS URL with AASA file) — if app installed, OS opens app
-      //    (this branch only runs when UL didn't fire upstream, e.g. in-app browser)
-      // 2. URI scheme (myapp://path) — explicit deep link
-      // 3. Mobile fallback (browser-aware):
-      //    - regular browser: App Store URL > web fallback URL
-      //      (UL would have fired if app installed, so app is not installed)
-      //    - in-app browser: web fallback URL > App Store URL
-      //      (UL was bypassed; web fallback gives UL a second chance to fire)
-      // 4. Original URL — ultimate fallback
-      if (link.ios_universal_link) {
+      // 1. Universal Link HTTPS (not App Store URL — common misconfig)
+      // 2. URI scheme
+      // 3. Mobile fallback (store / web)
+      // 4. Original URL
+      if (isHttpsAppLink(link.ios_universal_link)) {
         redirectUrl = link.ios_universal_link;
-      } else if (link.app_scheme && link.deep_link_path) {
-        // Build URI scheme URL: myapp://product/123
-        redirectUrl = `${link.app_scheme}://${link.deep_link_path.replace(/^\//, '')}`;
+      } else if (link.app_scheme) {
+        const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
+        redirectUrl = `${link.app_scheme}://${deepPath}`;
         useSchemeUrl = true;
+      } else if (link.ios_universal_link && isMobileStoreUrl(link.ios_universal_link)) {
+        // Misconfigured: store URL in universal-link field → treat as store
+        redirectUrl = link.ios_universal_link;
       } else {
         const fb = pickMobileFallbackUrl('ios', userAgent, iosUrl, androidUrl, webFallbackUrl);
         if (fb) redirectUrl = fb.url;
       }
 
     } else if (device === 'android') {
-      // Android Priority — same logic as iOS, with android_app_link in place of UL
-      if (link.android_app_link) {
+      if (isHttpsAppLink(link.android_app_link)) {
         redirectUrl = link.android_app_link;
-      } else if (link.app_scheme && link.deep_link_path) {
-        // Build URI scheme URL: myapp://product/123
-        redirectUrl = `${link.app_scheme}://${link.deep_link_path.replace(/^\//, '')}`;
+      } else if (link.app_scheme) {
+        const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
+        redirectUrl = `${link.app_scheme}://${deepPath}`;
         useSchemeUrl = true;
+      } else if (link.android_app_link && isMobileStoreUrl(link.android_app_link)) {
+        redirectUrl = link.android_app_link;
       } else {
         const fb = pickMobileFallbackUrl('android', userAgent, iosUrl, androidUrl, webFallbackUrl);
         if (fb) redirectUrl = fb.url;
@@ -571,35 +616,44 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Serve an interstitial page for mobile requests when a custom scheme is available.
-    // The interstitial tries to open the app via URI scheme, then falls back to the store.
-    // This works for both in-app browsers (where Universal Links don't fire) and regular
-    // browsers (where a 302 to a custom scheme fails silently if the app isn't installed).
-    // The interstitial JavaScript preserves the URL fragment (E2E encryption key).
-    if ((device === 'ios' || device === 'android') && link.app_scheme) {
+    // Interstitial only when using custom scheme (not a real HTTPS Universal/App Link).
+    // Store URLs in the universal/app-link fields must not skip the scheme interstitial.
+    const hasHttpsAppLink =
+      (device === 'ios' && isHttpsAppLink(link.ios_universal_link)) ||
+      (device === 'android' && isHttpsAppLink(link.android_app_link));
+
+    if ((device === 'ios' || device === 'android') && link.app_scheme && !hasHttpsAppLink) {
       const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
-      const schemeUrl = link.custom_scheme_url
+      let schemeUrl = link.custom_scheme_url
         || `${link.app_scheme}://${deepPath}`;
 
-      // The interstitial JS tries the scheme first; storeFallback is what we
-      // navigate to if the scheme doesn't open the app within ~1.5s. Pick it
-      // browser-aware: regular browsers prefer the store URL, in-app browsers
-      // prefer the web fallback (gives UL a second chance to fire).
       const fb = pickMobileFallbackUrl(device, userAgent, iosUrl, androidUrl, webFallbackUrl);
       const storeFallback = fb?.url || link.original_url;
 
       if (storeFallback) {
-        let fullSchemeUrl = schemeUrl;
+        let query = '';
         if (link.deep_link_parameters && Object.keys(link.deep_link_parameters).length > 0) {
           const params = new URLSearchParams(
             Object.entries(link.deep_link_parameters).map(([k, v]: [string, any]) => [k, String(v)] as [string, string])
           );
-          fullSchemeUrl += (fullSchemeUrl.includes('?') ? '&' : '?') + params.toString();
+          query = params.toString();
+          if (!link.custom_scheme_url) {
+            schemeUrl += (schemeUrl.includes('?') ? '&' : '?') + query;
+          }
+        }
+
+        const androidPkg = process.env.ANDROID_PACKAGE_NAME?.trim();
+        if (device === 'android' && androidPkg && !link.custom_scheme_url) {
+          schemeUrl = buildAndroidIntentUrl({
+            scheme: link.app_scheme,
+            path: deepPath + (query ? `?${query}` : ''),
+            packageName: androidPkg,
+          });
         }
 
         return reply
           .header('Content-Type', 'text/html; charset=utf-8')
-          .send(generateInterstitialHTML(fullSchemeUrl, storeFallback, link.title || link.og_title));
+          .send(generateInterstitialHTML(schemeUrl, storeFallback, link.title || link.og_title));
       }
     }
 

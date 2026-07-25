@@ -7,21 +7,35 @@
  * - IOS_TEAM_ID: Your Apple Developer Team ID (e.g., "ABC123XYZ")
  * - IOS_BUNDLE_ID: Your iOS app bundle identifier (e.g., "com.example.app")
  * - ANDROID_PACKAGE_NAME: Your Android package name (e.g., "com.example.app")
- * - ANDROID_SHA256_FINGERPRINTS: Comma-separated SHA-256 fingerprints (e.g., "AA:BB:CC:...,DD:EE:FF:...")
+ * - ANDROID_SHA256_FINGERPRINTS: Comma-separated SHA-256 fingerprints
  *
  * These files must be served on the public SHORTLINK host (not the dashboard host).
  */
 
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+/** Modern (appIDs/components) + legacy (appID/paths) for broad iOS support. */
 export function buildAasaPayload(teamId: string, bundleId: string) {
+  const appId = `${teamId}.${bundleId}`;
   return {
     applinks: {
       apps: [] as string[],
       details: [
         {
-          appID: `${teamId}.${bundleId}`,
-          paths: ['*'],
+          appID: appId,
+          appIDs: [appId],
+          paths: [
+            'NOT /.well-known/*',
+            'NOT /apple-app-site-association',
+            'NOT /api/*',
+            '*',
+          ],
+          components: [
+            { '/': '/.well-known/*', exclude: true, comment: 'AASA / assetlinks' },
+            { '/': '/apple-app-site-association', exclude: true },
+            { '/': '/api/*', exclude: true, comment: 'Core API' },
+            { '/': '*', comment: 'All shortlinks and paths' },
+          ],
         },
       ],
     },
@@ -29,8 +43,8 @@ export function buildAasaPayload(teamId: string, bundleId: string) {
 }
 
 async function sendAasa(_request: FastifyRequest, reply: FastifyReply) {
-  const teamId = process.env.IOS_TEAM_ID;
-  const bundleId = process.env.IOS_BUNDLE_ID;
+  const teamId = process.env.IOS_TEAM_ID?.trim();
+  const bundleId = process.env.IOS_BUNDLE_ID?.trim();
 
   if (!teamId || !bundleId) {
     return reply.status(404).send({
@@ -41,29 +55,19 @@ async function sendAasa(_request: FastifyRequest, reply: FastifyReply) {
     });
   }
 
-  // AASA must be: no .json extension, application/json, HTTPS in production.
-  // Apple also fetches /apple-app-site-association (root) on some flows.
+  // No redirects, application/json, HTTPS — required by Apple.
   return reply
     .header('Content-Type', 'application/json')
+    .header('Cache-Control', 'public, max-age=300')
     .send(buildAasaPayload(teamId, bundleId));
 }
 
 export async function wellKnownRoutes(fastify: FastifyInstance) {
-  /**
-   * Apple App Site Association (AASA)
-   * https://developer.apple.com/documentation/xcode/supporting-associated-domains
-   */
   fastify.get('/.well-known/apple-app-site-association', sendAasa);
   fastify.get('/apple-app-site-association', sendAasa);
 
-  /**
-   * Digital Asset Links (assetlinks.json)
-   * https://developer.android.com/training/app-links/verify-android-applinks
-   *
-   * Endpoint: GET /.well-known/assetlinks.json
-   */
-  fastify.get('/.well-known/assetlinks.json', async (request, reply) => {
-    const packageName = process.env.ANDROID_PACKAGE_NAME;
+  fastify.get('/.well-known/assetlinks.json', async (_request, reply) => {
+    const packageName = process.env.ANDROID_PACKAGE_NAME?.trim();
     const fingerprintsEnv = process.env.ANDROID_SHA256_FINGERPRINTS;
 
     if (!packageName || !fingerprintsEnv) {
@@ -78,7 +82,9 @@ export async function wellKnownRoutes(fastify: FastifyInstance) {
     const fingerprints = fingerprintsEnv
       .split(',')
       .map((fp) => fp.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      // Digital Asset Links / Play Console use uppercase hex
+      .map((fp) => fp.toUpperCase());
 
     if (fingerprints.length === 0) {
       return reply.status(500).send({
@@ -101,6 +107,9 @@ export async function wellKnownRoutes(fastify: FastifyInstance) {
       },
     ];
 
-    return reply.header('Content-Type', 'application/json').send(assetlinks);
+    return reply
+      .header('Content-Type', 'application/json')
+      .header('Cache-Control', 'public, max-age=300')
+      .send(assetlinks);
   });
 }

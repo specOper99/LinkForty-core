@@ -3,13 +3,15 @@ import Fastify from 'fastify';
 import { buildAasaPayload, wellKnownRoutes } from './well-known.js';
 
 describe('buildAasaPayload', () => {
-  it('builds TeamID.BundleID appID', () => {
-    expect(buildAasaPayload('ABC123', 'com.example.app')).toEqual({
-      applinks: {
-        apps: [],
-        details: [{ appID: 'ABC123.com.example.app', paths: ['*'] }],
-      },
-    });
+  it('includes modern appIDs/components and legacy appID/paths', () => {
+    const payload = buildAasaPayload('ABC123', 'com.example.app');
+    const detail = payload.applinks.details[0];
+    expect(detail.appID).toBe('ABC123.com.example.app');
+    expect(detail.appIDs).toEqual(['ABC123.com.example.app']);
+    expect(detail.paths).toContain('*');
+    expect(detail.paths.some((p) => p.startsWith('NOT '))).toBe(true);
+    expect(detail.components.some((c) => c.exclude === true)).toBe(true);
+    expect(detail.components.some((c) => c['/'] === '*')).toBe(true);
   });
 });
 
@@ -69,7 +71,7 @@ describe('wellKnownRoutes', () => {
 
   it('serves assetlinks when Android env set', async () => {
     process.env.ANDROID_PACKAGE_NAME = 'com.demo.app';
-    process.env.ANDROID_SHA256_FINGERPRINTS = 'AA:BB:CC,DD:EE:FF';
+    process.env.ANDROID_SHA256_FINGERPRINTS = 'aa:bb:cc,DD:EE:FF';
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/.well-known/assetlinks.json' });
     expect(res.statusCode).toBe(200);

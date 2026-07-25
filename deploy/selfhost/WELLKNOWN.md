@@ -13,15 +13,24 @@ docker compose -f docker-compose.selfhost.yml exec linkforty \
 
 | Result | Meaning |
 |---|---|
-| 404 JSON `Configuration missing` | `IOS_*` / `ANDROID_*` not in running Core — set via bootstrap mobile prompts or `.env`, recreate |
-| 200 + valid JSON | File OK; if store still opens, fix app Associated Domains / intent-filters for this host |
+| 404 JSON `Configuration missing` | `IOS_*` / `ANDROID_*` not in running Core — set via bootstrap, recreate |
+| 200 + `appIDs` / `components` | AASA OK |
 | Wrong host (`links-dash…`) | Dashboard has no AASA — use shortlink domain |
 
-`bootstrap.sh` runs these probes automatically after deploy when mobile env is present.
+## iOS still opens App Store / not app
 
-## Always opens store with app installed
+1. AASA must be 200 on **shortlink** host with correct Team ID + Bundle ID.
+2. Xcode Associated Domains: `applinks:links.example.com` (exact host).
+3. Link fields:
+   - **App scheme** = `myapp` (required for interstitial fallback)
+   - **iOS universal link** = `https://links…/…` — **never** `apps.apple.com`
+   - **iOS App Store URL** = store listing only
+4. After AASA change, iOS caches hard — delete app, reboot, or wait; Apple CDN can take hours.
+5. First tap from Notes/iMessage opens app when UL works; paste into Safari often stays in browser (iOS behavior).
+6. Core never auto-jumps to App Store anymore when scheme is set — only the Download button.
 
-1. If `.well-known` fails, OS never claims the HTTPS shortlink → browser hits Core.
-2. With `appScheme`, Core shows interstitial: try scheme, then store after 2.5s.
-3. Store timer cancels on `visibilitychange` / `pagehide` / `blur` when the app opens.
-4. Prefer working Universal/App Links so the OS opens the app without loading Core.
+## Android still opens Play
+
+1. Working `assetlinks.json` + Play App Signing fingerprint.
+2. Set **Android app link** (https shortlink host), **App scheme**, `ANDROID_PACKAGE_NAME`.
+3. No auto Play redirect when scheme/intent is used.
