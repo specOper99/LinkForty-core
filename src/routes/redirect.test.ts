@@ -5,6 +5,8 @@ import {
   pickMobileFallbackUrl,
   generateInterstitialHTML,
   buildAndroidIntentUrl,
+  buildAndroidHttpsAppIntent,
+  resolvePublicShortlinkUrl,
   isHttpsAppLink,
   isMobileStoreUrl,
 } from './redirect.js';
@@ -217,6 +219,35 @@ describe('buildAndroidIntentUrl', () => {
     expect(url).toBe(
       'intent://product/1#Intent;scheme=myapp;package=com.example.app;end',
     );
+  });
+});
+
+describe('buildAndroidHttpsAppIntent', () => {
+  it('builds https App Links intent for package', () => {
+    expect(
+      buildAndroidHttpsAppIntent({
+        httpsUrl: 'https://links.example.com/abc',
+        packageName: 'com.mediaZan.master964Application',
+      }),
+    ).toBe(
+      'intent://links.example.com/abc#Intent;scheme=https;package=com.mediaZan.master964Application;end',
+    );
+  });
+});
+
+describe('resolvePublicShortlinkUrl', () => {
+  it('uses SHORTLINK_BASE_URL when set', () => {
+    const prev = process.env.SHORTLINK_BASE_URL;
+    process.env.SHORTLINK_BASE_URL = 'https://links.example.com';
+    expect(
+      resolvePublicShortlinkUrl({
+        shortCode: 'abc',
+        protocol: 'http',
+        hostname: 'localhost',
+      }),
+    ).toBe('https://links.example.com/abc');
+    if (prev === undefined) delete process.env.SHORTLINK_BASE_URL;
+    else process.env.SHORTLINK_BASE_URL = prev;
   });
 });
 

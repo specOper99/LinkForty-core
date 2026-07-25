@@ -122,6 +122,9 @@ export function isHttpsAppLink(url: string | null | undefined): boolean {
  * Build a Chrome Intent URL for Android. Custom schemes often fail silently in
  * Chrome; intent:// with package opens the app when installed.
  * https://developer.chrome.com/docs/android/intents
+ *
+ * For App Links–only apps (https hosts, no custom scheme), use scheme "https"
+ * and path "host/path" (see buildAndroidHttpsAppIntent).
  */
 export function buildAndroidIntentUrl(opts: {
   scheme: string;
@@ -137,6 +140,47 @@ export function buildAndroidIntentUrl(opts: {
   }
   intent += ';end';
   return intent;
+}
+
+/** intent://host/path#Intent;scheme=https;package=… — open App Links target in the app. */
+export function buildAndroidHttpsAppIntent(opts: {
+  httpsUrl: string;
+  packageName: string;
+  fallbackUrl?: string;
+}): string {
+  const u = new URL(opts.httpsUrl);
+  const hostPath = `${u.host}${u.pathname}${u.search}`;
+  return buildAndroidIntentUrl({
+    scheme: 'https',
+    path: hostPath,
+    packageName: opts.packageName,
+    fallbackUrl: opts.fallbackUrl,
+  });
+}
+
+/** Public shortlink URL for this click (SHORTLINK_BASE_URL preferred). */
+export function resolvePublicShortlinkUrl(opts: {
+  shortCode: string;
+  templateSlug?: string;
+  protocol: string;
+  hostname: string;
+}): string {
+  const fromBase = process.env.SHORTLINK_BASE_URL?.trim();
+  const fromDomain = process.env.SHORTLINK_DOMAIN?.trim();
+  let origin: string;
+  if (fromBase) {
+    origin = fromBase.replace(/\/$/, '');
+  } else if (fromDomain) {
+    origin = /^https?:\/\//i.test(fromDomain)
+      ? fromDomain.replace(/\/$/, '')
+      : `https://${fromDomain.replace(/^\/+|\/+$/g, '')}`;
+  } else {
+    origin = `${opts.protocol}://${opts.hostname}`.replace(/\/$/, '');
+  }
+  if (opts.templateSlug) {
+    return `${origin}/${opts.templateSlug}/${opts.shortCode}`;
+  }
+  return `${origin}/${opts.shortCode}`;
 }
 
 /**
@@ -557,6 +601,15 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         useSchemeUrl = true;
       } else if (link.android_app_link && isMobileStoreUrl(link.android_app_link)) {
         redirectUrl = link.android_app_link;
+      } else if (process.env.ANDROID_PACKAGE_NAME?.trim()) {
+        // App Links–only apps (https hosts, no custom scheme): do NOT 302 to Play.
+        // Stay on a public https shortlink URL; interstitial uses intent:// + package.
+        redirectUrl = resolvePublicShortlinkUrl({
+          shortCode,
+          templateSlug,
+          protocol: request.protocol,
+          hostname: request.hostname,
+        });
       } else {
         const fb = pickMobileFallbackUrl('android', userAgent, iosUrl, androidUrl, webFallbackUrl);
         if (fb) redirectUrl = fb.url;
@@ -616,21 +669,46 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Interstitial only when using custom scheme (not a real HTTPS Universal/App Link).
-    // Store URLs in the universal/app-link fields must not skip the scheme interstitial.
+    // Mobile open interstitial:
+    // - iOS/Android with custom scheme → try scheme (Android: intent:// + package when set)
+    // - Android App Links–only (no custom scheme) + ANDROID_PACKAGE_NAME →
+    //   intent://host/path#Intent;scheme=https;package=…  (do NOT 302 to Play)
+    const androidPkg = process.env.ANDROID_PACKAGE_NAME?.trim();
     const hasHttpsAppLink =
       (device === 'ios' && isHttpsAppLink(link.ios_universal_link)) ||
       (device === 'android' && isHttpsAppLink(link.android_app_link));
 
-    if ((device === 'ios' || device === 'android') && link.app_scheme && !hasHttpsAppLink) {
-      const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
-      let schemeUrl = link.custom_scheme_url
-        || `${link.app_scheme}://${deepPath}`;
+    const wantSchemeInterstitial =
+      (device === 'ios' || device === 'android') && !!link.app_scheme && !hasHttpsAppLink;
+    const wantAndroidHttpsIntent =
+      device === 'android' && !!androidPkg && !link.app_scheme;
 
+    if (wantSchemeInterstitial || wantAndroidHttpsIntent) {
       const fb = pickMobileFallbackUrl(device, userAgent, iosUrl, androidUrl, webFallbackUrl);
       const storeFallback = fb?.url || link.original_url;
+      if (!storeFallback) {
+        return reply.redirect(302, finalUrl);
+      }
 
-      if (storeFallback) {
+      let openUrl: string;
+
+      if (wantAndroidHttpsIntent) {
+        const httpsTarget = isHttpsAppLink(link.android_app_link)
+          ? link.android_app_link!
+          : resolvePublicShortlinkUrl({
+              shortCode,
+              templateSlug,
+              protocol: request.protocol,
+              hostname: request.hostname,
+            });
+        openUrl = buildAndroidHttpsAppIntent({
+          httpsUrl: httpsTarget,
+          packageName: androidPkg!,
+          // no browser_fallback_url — Play is manual button only
+        });
+      } else {
+        const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
+        openUrl = link.custom_scheme_url || `${link.app_scheme}://${deepPath}`;
         let query = '';
         if (link.deep_link_parameters && Object.keys(link.deep_link_parameters).length > 0) {
           const params = new URLSearchParams(
@@ -638,23 +716,21 @@ export async function redirectRoutes(fastify: FastifyInstance) {
           );
           query = params.toString();
           if (!link.custom_scheme_url) {
-            schemeUrl += (schemeUrl.includes('?') ? '&' : '?') + query;
+            openUrl += (openUrl.includes('?') ? '&' : '?') + query;
           }
         }
-
-        const androidPkg = process.env.ANDROID_PACKAGE_NAME?.trim();
         if (device === 'android' && androidPkg && !link.custom_scheme_url) {
-          schemeUrl = buildAndroidIntentUrl({
-            scheme: link.app_scheme,
+          openUrl = buildAndroidIntentUrl({
+            scheme: link.app_scheme!,
             path: deepPath + (query ? `?${query}` : ''),
             packageName: androidPkg,
           });
         }
-
-        return reply
-          .header('Content-Type', 'text/html; charset=utf-8')
-          .send(generateInterstitialHTML(schemeUrl, storeFallback, link.title || link.og_title));
       }
+
+      return reply
+        .header('Content-Type', 'text/html; charset=utf-8')
+        .send(generateInterstitialHTML(openUrl, storeFallback, link.title || link.og_title));
     }
 
     // Redirect
