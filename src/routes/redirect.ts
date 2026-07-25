@@ -183,6 +183,31 @@ export function resolvePublicShortlinkUrl(opts: {
   return `${origin}/${opts.shortCode}`;
 }
 
+/** HTTPS URL the Android app should open (defined destination, not the shortlink). */
+export function resolveAndroidAppOpenUrl(opts: {
+  androidAppLink?: string | null;
+  originalUrl?: string | null;
+  webFallbackUrl?: string | null;
+  shortlinkUrl: string;
+}): string {
+  if (isHttpsAppLink(opts.androidAppLink)) return opts.androidAppLink!.trim();
+  if (isHttpsAppLink(opts.originalUrl)) return opts.originalUrl!.trim();
+  if (isHttpsAppLink(opts.webFallbackUrl)) return opts.webFallbackUrl!.trim();
+  return opts.shortlinkUrl;
+}
+
+/** True when request is from an Android app WebView (already inside the app). */
+export function isAndroidAppWebView(
+  userAgent: string,
+  xRequestedWith?: string | string[] | undefined,
+): boolean {
+  const pkg = process.env.ANDROID_PACKAGE_NAME?.trim();
+  const xrw = Array.isArray(xRequestedWith) ? xRequestedWith[0] : xRequestedWith;
+  if (pkg && xrw && xrw === pkg) return true;
+  // Generic Android WebView marker (e.g. "... Chrome/120.0.0.0 Mobile Safari/537.36; wv)")
+  return /\swv\)/.test(userAgent);
+}
+
 /**
  * Generate an interstitial that tries to open the app via custom scheme / intent.
  * Store download is a button only — never auto-navigate to the store.
@@ -593,7 +618,28 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       }
 
     } else if (device === 'android') {
-      if (isHttpsAppLink(link.android_app_link)) {
+      const shortlinkUrl = resolvePublicShortlinkUrl({
+        shortCode,
+        templateSlug,
+        protocol: request.protocol,
+        hostname: request.hostname,
+      });
+      const androidOpenUrl = resolveAndroidAppOpenUrl({
+        androidAppLink: link.android_app_link,
+        originalUrl: link.original_url,
+        webFallbackUrl,
+        shortlinkUrl,
+      });
+      const inAppWebView = isAndroidAppWebView(
+        userAgent,
+        request.headers['x-requested-with'],
+      );
+
+      if (inAppWebView) {
+        // Already inside the app WebView — never serve intent:// (ERR_UNKNOWN_URL_SCHEME).
+        // Send the defined destination page.
+        redirectUrl = androidOpenUrl;
+      } else if (isHttpsAppLink(link.android_app_link)) {
         redirectUrl = link.android_app_link;
       } else if (link.app_scheme) {
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
@@ -602,14 +648,8 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       } else if (link.android_app_link && isMobileStoreUrl(link.android_app_link)) {
         redirectUrl = link.android_app_link;
       } else if (process.env.ANDROID_PACKAGE_NAME?.trim()) {
-        // App Links–only apps (https hosts, no custom scheme): do NOT 302 to Play.
-        // Stay on a public https shortlink URL; interstitial uses intent:// + package.
-        redirectUrl = resolvePublicShortlinkUrl({
-          shortCode,
-          templateSlug,
-          protocol: request.protocol,
-          hostname: request.hostname,
-        });
+        // Browser: interstitial will intent:// to androidOpenUrl (defined destination).
+        redirectUrl = androidOpenUrl;
       } else {
         const fb = pickMobileFallbackUrl('android', userAgent, iosUrl, androidUrl, webFallbackUrl);
         if (fb) redirectUrl = fb.url;
@@ -669,19 +709,25 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Mobile open interstitial:
-    // - iOS/Android with custom scheme → try scheme (Android: intent:// + package when set)
-    // - Android App Links–only (no custom scheme) + ANDROID_PACKAGE_NAME →
-    //   intent://host/path#Intent;scheme=https;package=…  (do NOT 302 to Play)
+    // Mobile open interstitial (Chrome / external browser only):
+    // - Never intent:// inside app WebView (causes ERR_UNKNOWN_URL_SCHEME)
+    // - Android package + no custom scheme → intent https to DEFINED destination
     const androidPkg = process.env.ANDROID_PACKAGE_NAME?.trim();
+    const inAppWebView =
+      device === 'android' &&
+      isAndroidAppWebView(userAgent, request.headers['x-requested-with']);
+
     const hasHttpsAppLink =
       (device === 'ios' && isHttpsAppLink(link.ios_universal_link)) ||
       (device === 'android' && isHttpsAppLink(link.android_app_link));
 
     const wantSchemeInterstitial =
-      (device === 'ios' || device === 'android') && !!link.app_scheme && !hasHttpsAppLink;
+      !inAppWebView &&
+      (device === 'ios' || device === 'android') &&
+      !!link.app_scheme &&
+      !hasHttpsAppLink;
     const wantAndroidHttpsIntent =
-      device === 'android' && !!androidPkg && !link.app_scheme;
+      !inAppWebView && device === 'android' && !!androidPkg && !link.app_scheme;
 
     if (wantSchemeInterstitial || wantAndroidHttpsIntent) {
       const fb = pickMobileFallbackUrl(device, userAgent, iosUrl, androidUrl, webFallbackUrl);
@@ -693,18 +739,21 @@ export async function redirectRoutes(fastify: FastifyInstance) {
       let openUrl: string;
 
       if (wantAndroidHttpsIntent) {
-        const httpsTarget = isHttpsAppLink(link.android_app_link)
-          ? link.android_app_link!
-          : resolvePublicShortlinkUrl({
-              shortCode,
-              templateSlug,
-              protocol: request.protocol,
-              hostname: request.hostname,
-            });
+        const shortlinkUrl = resolvePublicShortlinkUrl({
+          shortCode,
+          templateSlug,
+          protocol: request.protocol,
+          hostname: request.hostname,
+        });
+        const httpsTarget = resolveAndroidAppOpenUrl({
+          androidAppLink: link.android_app_link,
+          originalUrl: link.original_url,
+          webFallbackUrl,
+          shortlinkUrl,
+        });
         openUrl = buildAndroidHttpsAppIntent({
           httpsUrl: httpsTarget,
           packageName: androidPkg!,
-          // no browser_fallback_url — Play is manual button only
         });
       } else {
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';

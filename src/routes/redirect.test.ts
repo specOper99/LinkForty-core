@@ -7,6 +7,8 @@ import {
   buildAndroidIntentUrl,
   buildAndroidHttpsAppIntent,
   resolvePublicShortlinkUrl,
+  resolveAndroidAppOpenUrl,
+  isAndroidAppWebView,
   isHttpsAppLink,
   isMobileStoreUrl,
 } from './redirect.js';
@@ -248,6 +250,58 @@ describe('resolvePublicShortlinkUrl', () => {
     ).toBe('https://links.example.com/abc');
     if (prev === undefined) delete process.env.SHORTLINK_BASE_URL;
     else process.env.SHORTLINK_BASE_URL = prev;
+  });
+});
+
+describe('resolveAndroidAppOpenUrl', () => {
+  it('prefers android app link, then original_url, then web fallback', () => {
+    expect(
+      resolveAndroidAppOpenUrl({
+        androidAppLink: 'https://en.964media.com/story/1',
+        originalUrl: 'https://example.com/other',
+        webFallbackUrl: 'https://example.com/web',
+        shortlinkUrl: 'https://links.964media.com/tester',
+      }),
+    ).toBe('https://en.964media.com/story/1');
+
+    expect(
+      resolveAndroidAppOpenUrl({
+        androidAppLink: null,
+        originalUrl: 'https://en.964media.com/story/2',
+        webFallbackUrl: 'https://example.com/web',
+        shortlinkUrl: 'https://links.964media.com/tester',
+      }),
+    ).toBe('https://en.964media.com/story/2');
+  });
+
+  it('does not use Play Store as open URL', () => {
+    expect(
+      resolveAndroidAppOpenUrl({
+        androidAppLink: 'https://play.google.com/store/apps/details?id=x',
+        originalUrl: 'https://en.964media.com/ok',
+        shortlinkUrl: 'https://links.964media.com/t',
+      }),
+    ).toBe('https://en.964media.com/ok');
+  });
+});
+
+describe('isAndroidAppWebView', () => {
+  it('detects wv marker and X-Requested-With package', () => {
+    expect(
+      isAndroidAppWebView(
+        'Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+      ),
+    ).toBe(true);
+    const prev = process.env.ANDROID_PACKAGE_NAME;
+    process.env.ANDROID_PACKAGE_NAME = 'com.mediaZan.master964Application';
+    expect(
+      isAndroidAppWebView(
+        'Mozilla/5.0 Chrome/120.0.0.0 Mobile Safari/537.36',
+        'com.mediaZan.master964Application',
+      ),
+    ).toBe(true);
+    if (prev === undefined) delete process.env.ANDROID_PACKAGE_NAME;
+    else process.env.ANDROID_PACKAGE_NAME = prev;
   });
 });
 
