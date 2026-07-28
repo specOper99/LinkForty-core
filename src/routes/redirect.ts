@@ -183,6 +183,36 @@ export function resolvePublicShortlinkUrl(opts: {
   return `${origin}/${opts.shortCode}`;
 }
 
+/** True if URL host is the public shortlink domain (not a content destination). */
+export function isShortlinkHostUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const candidates = [
+      process.env.SHORTLINK_BASE_URL,
+      process.env.SHORTLINK_DOMAIN,
+    ].filter(Boolean) as string[];
+    for (const raw of candidates) {
+      try {
+        const h = /^https?:\/\//i.test(raw)
+          ? new URL(raw).hostname
+          : raw.replace(/^\/+|\/+$/g, '').split('/')[0];
+        if (h && host === h.toLowerCase()) return true;
+      } catch {
+        /* ignore bad env */
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** HTTPS content URL suitable for opening in the app (not store, not shortlink host). */
+export function isAppContentHttpsUrl(url: string | null | undefined): boolean {
+  if (!isHttpsAppLink(url)) return false;
+  return !isShortlinkHostUrl(url!);
+}
+
 /** HTTPS URL the Android app should open (defined destination, not the shortlink). */
 export function resolveAndroidAppOpenUrl(opts: {
   androidAppLink?: string | null;
@@ -190,7 +220,25 @@ export function resolveAndroidAppOpenUrl(opts: {
   webFallbackUrl?: string | null;
   shortlinkUrl: string;
 }): string {
-  if (isHttpsAppLink(opts.androidAppLink)) return opts.androidAppLink!.trim();
+  if (isAppContentHttpsUrl(opts.androidAppLink)) return opts.androidAppLink!.trim();
+  if (isAppContentHttpsUrl(opts.originalUrl)) return opts.originalUrl!.trim();
+  if (isAppContentHttpsUrl(opts.webFallbackUrl)) return opts.webFallbackUrl!.trim();
+  // Fallbacks that may still be https (including shortlink as last resort)
+  if (isHttpsAppLink(opts.originalUrl)) return opts.originalUrl!.trim();
+  if (isHttpsAppLink(opts.webFallbackUrl)) return opts.webFallbackUrl!.trim();
+  return opts.shortlinkUrl;
+}
+
+/** HTTPS URL the iOS app / WKWebView should open (defined destination, not shortlink). */
+export function resolveIosAppOpenUrl(opts: {
+  iosUniversalLink?: string | null;
+  originalUrl?: string | null;
+  webFallbackUrl?: string | null;
+  shortlinkUrl: string;
+}): string {
+  if (isAppContentHttpsUrl(opts.iosUniversalLink)) return opts.iosUniversalLink!.trim();
+  if (isAppContentHttpsUrl(opts.originalUrl)) return opts.originalUrl!.trim();
+  if (isAppContentHttpsUrl(opts.webFallbackUrl)) return opts.webFallbackUrl!.trim();
   if (isHttpsAppLink(opts.originalUrl)) return opts.originalUrl!.trim();
   if (isHttpsAppLink(opts.webFallbackUrl)) return opts.webFallbackUrl!.trim();
   return opts.shortlinkUrl;
@@ -204,8 +252,19 @@ export function isAndroidAppWebView(
   const pkg = process.env.ANDROID_PACKAGE_NAME?.trim();
   const xrw = Array.isArray(xRequestedWith) ? xRequestedWith[0] : xRequestedWith;
   if (pkg && xrw && xrw === pkg) return true;
-  // Generic Android WebView marker (e.g. "... Chrome/120.0.0.0 Mobile Safari/537.36; wv)")
   return /\swv\)/.test(userAgent);
+}
+
+/**
+ * True when request looks like iOS WKWebView / in-app browser (app already open).
+ * Real Mobile Safari includes "Version/x Safari/y"; many WKWebViews omit that.
+ */
+export function isIosAppWebView(userAgent: string): boolean {
+  if (!/iPhone|iPad|iPod/i.test(userAgent)) return false;
+  if (isIOSInAppBrowser(userAgent)) return true;
+  const hasVersionSafari = /Version\/[\d.]+.*Safari\//i.test(userAgent);
+  const hasAppleWebKitMobile = /AppleWebKit\/.*Mobile\//i.test(userAgent);
+  return hasAppleWebKitMobile && !hasVersionSafari;
 }
 
 /**
@@ -598,19 +657,31 @@ export async function redirectRoutes(fastify: FastifyInstance) {
     let useSchemeUrl = false; // Track if we're using a URI scheme URL
 
     if (device === 'ios') {
-      // iOS Priority:
-      // 1. Universal Link HTTPS (not App Store URL — common misconfig)
-      // 2. URI scheme
-      // 3. Mobile fallback (store / web)
-      // 4. Original URL
-      if (isHttpsAppLink(link.ios_universal_link)) {
+      const shortlinkUrl = resolvePublicShortlinkUrl({
+        shortCode,
+        templateSlug,
+        protocol: request.protocol,
+        hostname: request.hostname,
+      });
+      const iosOpenUrl = resolveIosAppOpenUrl({
+        iosUniversalLink: link.ios_universal_link,
+        originalUrl: link.original_url,
+        webFallbackUrl,
+        shortlinkUrl,
+      });
+      const inAppWebView = isIosAppWebView(userAgent);
+
+      if (inAppWebView) {
+        // WKWebView / in-app already open — never bounce to shortlink or store.
+        // Send the defined destination (original_url / content https).
+        redirectUrl = iosOpenUrl;
+      } else if (isAppContentHttpsUrl(link.ios_universal_link)) {
         redirectUrl = link.ios_universal_link;
       } else if (link.app_scheme) {
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
         redirectUrl = `${link.app_scheme}://${deepPath}`;
         useSchemeUrl = true;
       } else if (link.ios_universal_link && isMobileStoreUrl(link.ios_universal_link)) {
-        // Misconfigured: store URL in universal-link field → treat as store
         redirectUrl = link.ios_universal_link;
       } else {
         const fb = pickMobileFallbackUrl('ios', userAgent, iosUrl, androidUrl, webFallbackUrl);
@@ -639,7 +710,7 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         // Already inside the app WebView — never serve intent:// (ERR_UNKNOWN_URL_SCHEME).
         // Send the defined destination page.
         redirectUrl = androidOpenUrl;
-      } else if (isHttpsAppLink(link.android_app_link)) {
+      } else if (isAppContentHttpsUrl(link.android_app_link)) {
         redirectUrl = link.android_app_link;
       } else if (link.app_scheme) {
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
@@ -710,16 +781,17 @@ export async function redirectRoutes(fastify: FastifyInstance) {
     }
 
     // Mobile open interstitial (Chrome / external browser only):
-    // - Never intent:// inside app WebView (causes ERR_UNKNOWN_URL_SCHEME)
+    // - Never intent:// / custom scheme inside app WebView
     // - Android package + no custom scheme → intent https to DEFINED destination
     const androidPkg = process.env.ANDROID_PACKAGE_NAME?.trim();
     const inAppWebView =
-      device === 'android' &&
-      isAndroidAppWebView(userAgent, request.headers['x-requested-with']);
+      (device === 'android' &&
+        isAndroidAppWebView(userAgent, request.headers['x-requested-with'])) ||
+      (device === 'ios' && isIosAppWebView(userAgent));
 
     const hasHttpsAppLink =
-      (device === 'ios' && isHttpsAppLink(link.ios_universal_link)) ||
-      (device === 'android' && isHttpsAppLink(link.android_app_link));
+      (device === 'ios' && isAppContentHttpsUrl(link.ios_universal_link)) ||
+      (device === 'android' && isAppContentHttpsUrl(link.android_app_link));
 
     const wantSchemeInterstitial =
       !inAppWebView &&

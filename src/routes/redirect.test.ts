@@ -8,7 +8,9 @@ import {
   buildAndroidHttpsAppIntent,
   resolvePublicShortlinkUrl,
   resolveAndroidAppOpenUrl,
+  resolveIosAppOpenUrl,
   isAndroidAppWebView,
+  isIosAppWebView,
   isHttpsAppLink,
   isMobileStoreUrl,
 } from './redirect.js';
@@ -283,6 +285,50 @@ describe('resolveAndroidAppOpenUrl', () => {
       }),
     ).toBe('https://en.964media.com/ok');
   });
+
+  it('skips shortlink-host app link in favor of original_url', () => {
+    const prev = process.env.SHORTLINK_BASE_URL;
+    process.env.SHORTLINK_BASE_URL = 'https://links.964media.com';
+    expect(
+      resolveAndroidAppOpenUrl({
+        androidAppLink: 'https://links.964media.com/tester',
+        originalUrl: 'https://en.964media.com/story/9',
+        shortlinkUrl: 'https://links.964media.com/tester',
+      }),
+    ).toBe('https://en.964media.com/story/9');
+    if (prev === undefined) delete process.env.SHORTLINK_BASE_URL;
+    else process.env.SHORTLINK_BASE_URL = prev;
+  });
+});
+
+describe('resolveIosAppOpenUrl', () => {
+  it('prefers content universal link, then original_url; skips shortlink host', () => {
+    const prev = process.env.SHORTLINK_BASE_URL;
+    process.env.SHORTLINK_BASE_URL = 'https://links.964media.com';
+    expect(
+      resolveIosAppOpenUrl({
+        iosUniversalLink: 'https://en.964media.com/story/1',
+        originalUrl: 'https://example.com/other',
+        shortlinkUrl: 'https://links.964media.com/t',
+      }),
+    ).toBe('https://en.964media.com/story/1');
+    expect(
+      resolveIosAppOpenUrl({
+        iosUniversalLink: 'https://links.964media.com/t',
+        originalUrl: 'https://en.964media.com/story/2',
+        shortlinkUrl: 'https://links.964media.com/t',
+      }),
+    ).toBe('https://en.964media.com/story/2');
+    expect(
+      resolveIosAppOpenUrl({
+        iosUniversalLink: 'https://apps.apple.com/app/id123',
+        originalUrl: 'https://en.964media.com/ok',
+        shortlinkUrl: 'https://links.964media.com/t',
+      }),
+    ).toBe('https://en.964media.com/ok');
+    if (prev === undefined) delete process.env.SHORTLINK_BASE_URL;
+    else process.env.SHORTLINK_BASE_URL = prev;
+  });
 });
 
 describe('isAndroidAppWebView', () => {
@@ -302,6 +348,26 @@ describe('isAndroidAppWebView', () => {
     ).toBe(true);
     if (prev === undefined) delete process.env.ANDROID_PACKAGE_NAME;
     else process.env.ANDROID_PACKAGE_NAME = prev;
+  });
+});
+
+describe('isIosAppWebView', () => {
+  it('detects WKWebView (no Version/Safari) and known in-app browsers', () => {
+    expect(
+      isIosAppWebView(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+      ),
+    ).toBe(true);
+    expect(
+      isIosAppWebView(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      ),
+    ).toBe(false);
+    expect(
+      isIosAppWebView(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) GSA/287.0 Mobile/15E148 Safari/604.1',
+      ),
+    ).toBe(true);
   });
 });
 
