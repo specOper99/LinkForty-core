@@ -11,6 +11,8 @@ import {
   type UpdateLinkRequest,
 } from "@/lib/core/schemas";
 import { emptyToUndefined } from "@/lib/core/normalize";
+import { LINK_DEFAULTS } from "@/lib/link-defaults";
+import { scrapeOpenGraph } from "@/lib/scrape-og";
 
 export type ActionResult = {
   ok: boolean;
@@ -48,7 +50,13 @@ function parseJsonRecord(raw: string | undefined): Record<string, unknown> | und
   return undefined;
 }
 
+function isAdvancedMode(form: FormData): boolean {
+  return String(form.get("advanced") ?? "") === "1";
+}
+
 function linkPayloadFromForm(form: FormData): CreateLinkRequest {
+  const advanced = isAdvancedMode(form);
+
   const countries = String(form.get("countries") ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -89,7 +97,7 @@ function linkPayloadFromForm(form: FormData): CreateLinkRequest {
     if (!Number.isNaN(d.getTime())) expiresAt = d.toISOString();
   }
 
-  return {
+  const payload: CreateLinkRequest = {
     originalUrl: String(form.get("originalUrl") ?? ""),
     title: formString(form, "title"),
     description: formString(form, "description"),
@@ -111,6 +119,54 @@ function linkPayloadFromForm(form: FormData): CreateLinkRequest {
     attributionWindowHours: formNumber(form, "attributionWindowHours"),
     expiresAt,
   };
+
+  if (!advanced) {
+    payload.iosAppStoreUrl = LINK_DEFAULTS.iosAppStoreUrl;
+    payload.androidAppStoreUrl = LINK_DEFAULTS.androidAppStoreUrl;
+    payload.utmParameters = { ...LINK_DEFAULTS.utmParameters };
+    payload.targetingRules = {
+      ...payload.targetingRules,
+      devices: [...LINK_DEFAULTS.targetingDevices],
+    };
+    delete payload.expiresAt;
+  }
+
+  return payload;
+}
+
+function ogFieldsEmpty(payload: CreateLinkRequest): boolean {
+  return (
+    !payload.ogTitle &&
+    !payload.ogDescription &&
+    !payload.ogImageUrl &&
+    !payload.ogType
+  );
+}
+
+async function applyOgOnCreate(
+  payload: CreateLinkRequest,
+): Promise<CreateLinkRequest> {
+  if (!ogFieldsEmpty(payload)) return payload;
+
+  const scraped = await scrapeOpenGraph(payload.originalUrl);
+  const hasScraped = Object.values(scraped).some(Boolean);
+  if (hasScraped) {
+    return {
+      ...payload,
+      ogTitle: scraped.ogTitle,
+      ogDescription: scraped.ogDescription,
+      ogImageUrl: scraped.ogImageUrl,
+      ogType: scraped.ogType,
+    };
+  }
+
+  return {
+    ...payload,
+    ogTitle: LINK_DEFAULTS.brandOg.title,
+    ogDescription: LINK_DEFAULTS.brandOg.description,
+    ogImageUrl: LINK_DEFAULTS.brandOg.imageUrl,
+    ogType: LINK_DEFAULTS.brandOg.type,
+  };
 }
 
 function toErrorMessage(err: unknown): string {
@@ -131,7 +187,8 @@ export async function createLinkAction(
 ): Promise<ActionResult> {
   await requireSession();
   try {
-    const payload = createLinkRequestSchema.parse(linkPayloadFromForm(formData));
+    const withDefaults = await applyOgOnCreate(linkPayloadFromForm(formData));
+    const payload = createLinkRequestSchema.parse(withDefaults);
     const link = await getCoreClient().createLink(payload);
     revalidatePath("/links");
     revalidatePath("/");
