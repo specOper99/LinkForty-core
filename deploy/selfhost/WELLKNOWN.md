@@ -28,7 +28,7 @@ docker compose -f docker-compose.selfhost.yml exec linkforty \
    - **iOS App Store URL** = store listing only
 4. After AASA change, iOS caches hard — delete app, reboot, or wait; Apple CDN can take hours.
 5. First tap from Notes/iMessage opens app when UL works; paste into Safari often stays in browser (iOS behavior).
-6. If UL opens app but WebView still shows `links…/CODE`: Core 302s WKWebView / in-app browsers to **original_url** (same idea as Android). Prefer `GET /api/sdk/v1/resolve/:code` in-app for native navigation.
+6. If UL opens app but WebView still shows `links…/CODE`: Core 302s WKWebView / in-app browsers to **original_url** (same idea as Android). That is **not** a native deeplink — it is an in-app browser. For native UX: intercept UL in-app, call `GET /api/sdk/v1/resolve/:code`, navigate with `deepLinkPath` / `originalUrl` / `iosUniversalLink` (do not WebView the shortlink as primary path).
 7. Core never auto-jumps to App Store anymore when scheme is set — only the Download button.
 
 ## Android still opens Play

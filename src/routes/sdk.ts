@@ -422,6 +422,9 @@ export async function sdkRoutes(fastify: FastifyInstance) {
    * - linkId: UUID of the link
    * - deepLinkPath: In-app destination path
    * - appScheme: Custom URI scheme
+   * - originalUrl: Defined content / destination URL
+   * - iosUniversalLink: iOS HTTPS content link (not App Store)
+   * - androidAppLink: Android HTTPS content link (not Play Store)
    * - iosUrl: iOS App Store URL
    * - androidUrl: Android Play Store URL
    * - webUrl: Web fallback URL
@@ -626,6 +629,9 @@ export async function sdkRoutes(fastify: FastifyInstance) {
       linkId: link.id,
       deepLinkPath: link.deep_link_path || undefined,
       appScheme: link.app_scheme || undefined,
+      originalUrl: link.original_url || undefined,
+      iosUniversalLink: link.ios_universal_link || undefined,
+      androidAppLink: link.android_app_link || undefined,
       iosUrl: link.ios_app_store_url || undefined,
       androidUrl: link.android_app_store_url || undefined,
       webUrl: link.web_fallback_url || undefined,

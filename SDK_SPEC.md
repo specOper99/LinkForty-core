@@ -120,6 +120,8 @@ Handles the case where a user taps a LinkForty link and the app is already insta
 
 When a Universal Link or App Link bypasses the redirect server (the OS opens the app directly), the SDK must resolve the link server-side to get the full link metadata that would normally come from the redirect.
 
+**iOS / Android native vs WebView:** OS delivery of `https://shortlink/CODE` is not enough. The app must intercept that URL, call resolve, and route natively. Loading the shortlink (or following Core's content 302) inside WKWebView / SFSafariViewController is an in-app browser path — useful as fallback only, not a native deeplink.
+
 ### What the SDK must do
 
 1. Extract path segments from the URL to determine the resolve path:
@@ -329,8 +331,11 @@ Canonical field names for cross-SDK data models. SDKs should use platform-approp
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | shortCode | string | Yes | The link's short code |
-| iosUrl | string | No | iOS destination URL |
-| androidUrl | string | No | Android destination URL |
+| originalUrl | string | No | Defined content / destination URL |
+| iosUniversalLink | string | No | iOS HTTPS content link (not App Store) |
+| androidAppLink | string | No | Android HTTPS content link (not Play Store) |
+| iosUrl | string | No | iOS App Store listing URL |
+| androidUrl | string | No | Android Play Store listing URL |
 | webUrl | string | No | Web fallback URL |
 | utmParameters | UTMParameters | No | UTM tracking parameters |
 | customParameters | map<string, string> | No | Custom query parameters |
@@ -338,6 +343,8 @@ Canonical field names for cross-SDK data models. SDKs should use platform-approp
 | appScheme | string | No | App URI scheme (e.g., `myapp`) |
 | clickedAt | datetime | No | When the link was clicked (ISO 8601) |
 | linkId | string | No | Link UUID from the backend |
+
+**Native routing:** On Universal Link / App Link open, call resolve and navigate with `deepLinkPath` + `customParameters` (or `originalUrl` / platform content links). Do **not** load the shortlink URL in a WebView as the primary path — that yields an in-app browser experience, not a native deeplink. Store fields (`iosUrl` / `androidUrl`) are for install fallbacks only.
 
 ### InstallResponse
 
