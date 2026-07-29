@@ -268,8 +268,11 @@ export function isIosAppWebView(userAgent: string): boolean {
 }
 
 /**
- * Generate an interstitial that tries to open the app via custom scheme / intent.
- * Store download is a button only — never auto-navigate to the store.
+ * Generate an interstitial that tries to open the app via custom scheme / intent,
+ * then falls back to the App Store / Play Store if the app does not open.
+ *
+ * Store fallback is cancelled on hide/blur (app likely opened). The Download
+ * button remains available if the timer is cancelled incorrectly.
  */
 export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string, title?: string): string {
   const safeSchemeUrl = schemeUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -304,9 +307,18 @@ export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string,
 <script>
   var hash = window.location.hash || '';
   var openUrl = "${safeSchemeUrl}";
+  var fallbackUrl = "${safeFallbackUrl}";
   var isIntent = ${isIntent ? 'true' : 'false'};
+  var storeTimer = null;
   if (hash && !isIntent) openUrl = openUrl + hash;
   document.getElementById('open-btn').href = openUrl;
+  function cancelStore() {
+    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+  }
+  function goStore() {
+    storeTimer = null;
+    window.location.replace(fallbackUrl);
+  }
   function tryOpen() {
     // iOS: hidden iframe helps older Safari with custom schemes; then location.
     if (!isIntent) {
@@ -320,7 +332,13 @@ export function generateInterstitialHTML(schemeUrl: string, fallbackUrl: string,
     }
     window.location.href = openUrl;
   }
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') cancelStore();
+  });
+  window.addEventListener('pagehide', cancelStore);
+  window.addEventListener('blur', cancelStore);
   setTimeout(tryOpen, 50);
+  storeTimer = setTimeout(goStore, 1500);
 </script>
 </body></html>`;
 }
@@ -535,7 +553,8 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         let redirectReason = 'original_url';
 
         if (deviceType === 'ios') {
-          if (link.ios_universal_link) {
+          // Mirror main redirect: in-app → content UL; Safari → store (UL already failed).
+          if (isIosAppWebView(userAgent) && link.ios_universal_link) {
             redirectUrl = link.ios_universal_link;
             redirectReason = 'ios_universal_link';
           } else if (link.app_scheme && link.deep_link_path) {
@@ -546,10 +565,13 @@ export async function redirectRoutes(fastify: FastifyInstance) {
             if (fb) {
               redirectUrl = fb.url;
               redirectReason = fb.reason;
+            } else if (link.ios_universal_link) {
+              redirectUrl = link.ios_universal_link;
+              redirectReason = 'ios_universal_link';
             }
           }
         } else if (deviceType === 'android') {
-          if (link.android_app_link) {
+          if (isAndroidAppWebView(userAgent, request.headers['x-requested-with']) && link.android_app_link) {
             redirectUrl = link.android_app_link;
             redirectReason = 'android_app_link';
           } else if (link.app_scheme && link.deep_link_path) {
@@ -675,17 +697,24 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         // WKWebView / in-app already open — never bounce to shortlink or store.
         // Send the defined destination (original_url / content https).
         redirectUrl = iosOpenUrl;
-      } else if (isAppContentHttpsUrl(link.ios_universal_link)) {
-        redirectUrl = link.ios_universal_link;
       } else if (link.app_scheme) {
+        // Custom scheme → interstitial tries open, then App Store.
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
         redirectUrl = `${link.app_scheme}://${deepPath}`;
         useSchemeUrl = true;
       } else if (link.ios_universal_link && isMobileStoreUrl(link.ios_universal_link)) {
+        // Misconfigured: store URL in universal-link field → treat as store
         redirectUrl = link.ios_universal_link;
       } else {
+        // Safari/Chrome reached Core ⇒ OS UL did not open the app (not installed
+        // or paste-in-Safari). Prefer App Store over content UL / web page.
+        // ios_universal_link is for the app / in-app WebView, not browser 302.
         const fb = pickMobileFallbackUrl('ios', userAgent, iosUrl, androidUrl, webFallbackUrl);
-        if (fb) redirectUrl = fb.url;
+        if (fb) {
+          redirectUrl = fb.url;
+        } else if (isAppContentHttpsUrl(link.ios_universal_link)) {
+          redirectUrl = link.ios_universal_link;
+        }
       }
 
     } else if (device === 'android') {
@@ -710,8 +739,6 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         // Already inside the app WebView — never serve intent:// (ERR_UNKNOWN_URL_SCHEME).
         // Send the defined destination page.
         redirectUrl = androidOpenUrl;
-      } else if (isAppContentHttpsUrl(link.android_app_link)) {
-        redirectUrl = link.android_app_link;
       } else if (link.app_scheme) {
         const deepPath = link.deep_link_path ? link.deep_link_path.replace(/^\//, '') : '';
         redirectUrl = `${link.app_scheme}://${deepPath}`;
@@ -722,8 +749,13 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         // Browser: interstitial will intent:// to androidOpenUrl (defined destination).
         redirectUrl = androidOpenUrl;
       } else {
+        // Same as iOS: request reached Core ⇒ prefer Play Store over content web.
         const fb = pickMobileFallbackUrl('android', userAgent, iosUrl, androidUrl, webFallbackUrl);
-        if (fb) redirectUrl = fb.url;
+        if (fb) {
+          redirectUrl = fb.url;
+        } else if (isAppContentHttpsUrl(link.android_app_link)) {
+          redirectUrl = link.android_app_link;
+        }
       }
 
     } else if (device === 'web') {
@@ -789,15 +821,13 @@ export async function redirectRoutes(fastify: FastifyInstance) {
         isAndroidAppWebView(userAgent, request.headers['x-requested-with'])) ||
       (device === 'ios' && isIosAppWebView(userAgent));
 
-    const hasHttpsAppLink =
-      (device === 'ios' && isAppContentHttpsUrl(link.ios_universal_link)) ||
-      (device === 'android' && isAppContentHttpsUrl(link.android_app_link));
-
+    // Content UL / App Link must not skip the scheme interstitial: a 302 to an
+    // HTTPS content URL opens the web when the app is not installed. Scheme
+    // interstitial tries the app first, then the store.
     const wantSchemeInterstitial =
       !inAppWebView &&
       (device === 'ios' || device === 'android') &&
-      !!link.app_scheme &&
-      !hasHttpsAppLink;
+      !!link.app_scheme;
     const wantAndroidHttpsIntent =
       !inAppWebView && device === 'android' && !!androidPkg && !link.app_scheme;
 

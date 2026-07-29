@@ -195,6 +195,17 @@ describe('pickMobileFallbackUrl — reporter scenario regression test', () => {
   });
 });
 
+/**
+ * Safari reached Core with ios_universal_link set = OS UL did not open the app.
+ * Store must win over content HTTPS (otherwise users land on web, not App Store).
+ */
+describe('iOS Safari store priority when content UL is configured', () => {
+  it('pickMobileFallbackUrl still returns store (main redirect uses this after skipping content UL)', () => {
+    const r = pickMobileFallbackUrl('ios', UA.iosSafari, URLS.iosStore, URLS.androidStore, URLS.webFallback);
+    expect(r).toEqual({ url: URLS.iosStore, reason: 'ios_app_store_url' });
+  });
+});
+
 describe('generateInterstitialHTML', () => {
   const html = generateInterstitialHTML(
     'myapp://product/1',
@@ -202,14 +213,15 @@ describe('generateInterstitialHTML', () => {
     'Demo',
   );
 
-  it('embeds scheme and store as buttons; tries iframe + location', () => {
+  it('embeds scheme and store; tries open then auto-falls back to store', () => {
     expect(html).toContain('myapp://product/1');
     expect(html).toContain('https://apps.apple.com/app/id123');
     expect(html).toContain('id="open-btn"');
     expect(html).toContain('createElement(\'iframe\')');
     expect(html).toContain('window.location.href = openUrl');
-    expect(html).not.toContain('goStore');
-    expect(html).not.toContain('location.replace');
+    expect(html).toContain('goStore');
+    expect(html).toContain('location.replace');
+    expect(html).toContain('setTimeout(goStore, 1500)');
   });
 });
 
